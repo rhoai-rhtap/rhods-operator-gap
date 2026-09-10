@@ -33,36 +33,18 @@ permissions:
   contents: write
   pull-requests: write
 
-# This workflow commits back to the PR branch, which fires another
-# 'synchronize'.  Serialise per PR so two runs never race on a push.
+# PR only: a rapid re-push should supersede the in-flight run.  Non-PR runs
+# get a unique group (github.run_id) so push behaviour is unchanged - no
+# serialisation, no cancellation.
 concurrency:
-  group: operator-processor-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: operator-processor-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   operator-processor:
     if: ${{ github.ref_name != 'main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || ( github.event_name == 'push' && github.event.commits[0].author.name == 'konflux-internal-p02[bot]' )) }}
     runs-on: ubuntu-latest
     steps:
-      # PR-only: loop prevention.  The commit-and-push step below writes to
-      # the PR head branch, which raises a 'synchronize' event; bail out if
-      # the tip commit is one we made ourselves.
-      - name: Check for bot commit (loop prevention)
-        if: github.event_name == 'pull_request'
-        id: bot-check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          AUTHOR=$(gh api "repos/${{ github.repository }}/commits/${{ github.event.pull_request.head.sha }}" \
-            --jq '.commit.author.name // "unknown"')
-          echo "Last commit author: $AUTHOR"
-          if [[ "$AUTHOR" == "Openshift-AI DevOps" ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Skipping - last commit was made by this workflow ($AUTHOR)"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       # Resolve every ref this run needs.
       #
       #   branch         the branch being processed (base branch for a PR)
@@ -74,7 +56,6 @@ jobs:
       #   rbc_ref        branch to read bundle/bundle-patch.yaml from
       #   operator_ref   branch to check out and commit back to
       - name: Configure workflow parameters
-        if: steps.bot-check.outputs.skip != 'true'
         id: config
         env:
           ORG: ${{ env.GITHUB_ORG }}
@@ -122,7 +103,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Checkout RBC repo
-        if: steps.bot-check.outputs.skip != 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: ${{ env.GITHUB_ORG }}/${{ env.RBC_REPO_NAME }}
@@ -132,7 +112,6 @@ jobs:
             bundle/bundle-patch.yaml
           sparse-checkout-cone-mode: false
       - name: Git checkout utils
-        if: steps.bot-check.outputs.skip != 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: ${{ env.GITHUB_ORG }}/${{ env.UTILS_REPO_NAME }}
@@ -142,13 +121,11 @@ jobs:
             utils/operator-processor
           sparse-checkout-cone-mode: false
       - name: Git checkout operator repo
-        if: steps.bot-check.outputs.skip != 'true'
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           repository: ${{ env.GITHUB_ORG }}/${{ env.OPERATOR_REPO_NAME }}
           ref: ${{ steps.config.outputs.operator_ref }}
           path: rhods-operator
-          token: ${{ secrets.GITHUB_TOKEN }}
           sparse-checkout: |
             build
             prefetched-manifests
@@ -156,7 +133,6 @@ jobs:
             .tekton
           sparse-checkout-cone-mode: false
       - name: Install dependencies
-        if: steps.bot-check.outputs.skip != 'true'
         run: |
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
           arch="$(uname -m | sed 's/x86_64/amd64/')"
@@ -171,7 +147,6 @@ jobs:
           pip install --default-timeout=100 -r utils/utils/operator-processor/requirements.txt
 
       - name: Execute Operator Processor
-        if: steps.bot-check.outputs.skip != 'true'
         env:
           # release_branch, not the raw branch: the processor passes this
           # straight to the Quay tag filter, so 'gap-poc' would match no tags.
@@ -201,7 +176,6 @@ jobs:
           fi
 
       - name: Fetch all manifests
-        if: steps.bot-check.outputs.skip != 'true'
         env:
           BRANCH: ${{ steps.config.outputs.release_branch }}
         run: |
@@ -306,7 +280,6 @@ jobs:
           tree
 
       - name: Fetch all charts
-        if: steps.bot-check.outputs.skip != 'true'
         env:
           BRANCH: ${{ steps.config.outputs.release_branch }}
         run: |
@@ -379,8 +352,7 @@ jobs:
           cd ${{ github.workspace }}/${PREFETCHED_CHARTS_DIR_PATH}
           tree
 
-      - name: Commit and push the changes
-        if: steps.bot-check.outputs.skip != 'true'
+      - name: Commit and push the changes to release branch
         working-directory: rhods-operator
         run: |
           git config user.name "Openshift-AI DevOps"
@@ -391,7 +363,7 @@ jobs:
       # PR-only: PaC triggers the pull-request pipeline off this comment
       # (see .tekton/odh-operator-pull-request.yaml, on-comment annotation).
       - name: Post /build-konflux comment on PR
-        if: steps.bot-check.outputs.skip != 'true' && github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
