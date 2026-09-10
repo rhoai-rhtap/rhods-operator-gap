@@ -146,11 +146,61 @@ jobs:
   
           pip install --default-timeout=100 -r utils/utils/operator-processor/requirements.txt
 
+      # The processor reads image digests and git labels from Quay.  Quay's
+      # /api/v1 REST API only accepts OAuth application tokens, which the
+      # release robot cannot mint, so the processor uses the /v2/ registry API
+      # via skopeo instead - the same credential and approach as
+      # rhods-devops-infra tools/tracer.
+      - name: Authenticate to Quay registry
+        env:
+          QUAY_PULL_SECRET: ${{ secrets.QUAY_PULL_SECRET || secrets.RHOAI_QUAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! command -v skopeo >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq skopeo
+          fi
+          skopeo --version
+
+          if [[ -z "${QUAY_PULL_SECRET}" ]]; then
+            echo "::error::No Quay credentials. Set the QUAY_PULL_SECRET repository secret to the 'RHOAI Quay ReadOnly bot' pull secret."
+            exit 1
+          fi
+
+          AUTHFILE="${RUNNER_TEMP}/quay-auth.json"
+
+          # Accept whichever form the Bitwarden entry was copied in: a full
+          # .dockerconfigjson, a base64 'user:password', or a bare
+          # 'user:password'.  Nothing here echoes the credential.
+          if printf '%s' "${QUAY_PULL_SECRET}" | jq -e '.auths' >/dev/null 2>&1; then
+            echo "Credential recognised as .dockerconfigjson"
+            printf '%s' "${QUAY_PULL_SECRET}" > "${AUTHFILE}"
+          else
+            CREDS="${QUAY_PULL_SECRET}"
+            if [[ "${CREDS}" != *:* ]]; then
+              CREDS=$(printf '%s' "${CREDS}" | base64 -d 2>/dev/null || true)
+            fi
+            if [[ "${CREDS}" != *:* ]]; then
+              echo "::error::Credential is not .dockerconfigjson, base64 'user:password', or 'user:password'."
+              exit 1
+            fi
+            echo "Credential recognised as user:password"
+            printf '%s' "${CREDS#*:}" | skopeo login --authfile "${AUTHFILE}" \
+              -u "${CREDS%%:*}" --password-stdin quay.io
+          fi
+
+          chmod 600 "${AUTHFILE}"
+          echo "REGISTRY_AUTH_FILE=${AUTHFILE}" >> "$GITHUB_ENV"
+
       - name: Execute Operator Processor
         env:
           # release_branch, not the raw branch: the processor passes this
           # straight to the Quay tag filter, so 'gap-poc' would match no tags.
           BRANCH: ${{ steps.config.outputs.release_branch }}
+          # 'skopeo' uses the /v2/ registry API and REGISTRY_AUTH_FILE above.
+          # 'api' uses /api/v1 and needs a Quay OAuth application token.
+          QUAY_BACKEND: skopeo
           RHOAI_QUAY_API_TOKEN: ${{ secrets.RHOAI_QUAY_API_TOKEN }}
         run: |
           RHOAI_VERSION=v${BRANCH/rhoai-/}
