@@ -10,26 +10,108 @@ on:
       - 'rhoai-[23].[0-9][0-9]-ea.[0-9]'  # e.g. rhoai-2.10-ea.1, rhoai-3.10-ea.3
     paths:
       - build/operator-nudging.yaml
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - gap-poc
 
 
 env:
-  GITHUB_ORG: red-hat-data-services
+  GITHUB_ORG: rhoai-rhtap
+  # GAP POC forks.  These carry the same content as the upstream
+  # red-hat-data-services repos but are safe to write to.
+  OPERATOR_REPO_NAME: rhods-operator-gap
+  RBC_REPO_NAME: RHOAI-Build-Config-gap
+  UTILS_REPO_NAME: RHOAI-Konflux-Automation-gap
+  # Branch holding the POC copies of the RBC bundle patch.  bundle/ does
+  # not exist on RBC main, so a non-release branch cannot fall back there.
+  POC_BRANCH: gap-poc
   LOG_FILE_DIR: ${{ github.workspace }}
   LOG_FILE_NAME: operator-processor.log
 
 permissions:
   contents: write
+  pull-requests: write
+
+# PR only: a rapid re-push should supersede the in-flight run.  Non-PR runs
+# get a unique group (github.run_id) so push behaviour is unchanged - no
+# serialisation, no cancellation.
+concurrency:
+  group: operator-processor-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   operator-processor:
-    if: ${{ github.ref_name != 'main' && (github.event_name == 'workflow_dispatch' || ( github.event_name == 'push' && github.event.commits[0].author.name == 'konflux-internal-p02[bot]' )) }}
+    # The pull_request clause excludes github-actions[bot]: the commit-and-push
+    # step below writes to the PR head branch, and that push does raise a
+    # 'synchronize' event whose actor is the bot.  (Such runs currently land in
+    # 'action_required' in this repo, but that is an approval setting, not a
+    # guarantee - without this the workflow would re-enter itself.)
+    if: ${{ github.ref_name != 'main' && (github.event_name == 'workflow_dispatch' || ( github.event_name == 'pull_request' && github.actor != 'github-actions[bot]' ) || ( github.event_name == 'push' && github.event.commits[0].author.name == 'konflux-internal-p02[bot]' )) }}
     runs-on: ubuntu-latest
     steps:
+      # Resolve every ref this run needs.
+      #
+      #   branch         the branch being processed (base branch for a PR)
+      #   release_branch the rhoai-X.Y identity of the run.  Drives the Quay
+      #                  tag filter, the component suffix and the manifest
+      #                  branch.  A non-release branch defaults to the
+      #                  highest rhoai-X.Y on the remote, matching how the
+      #                  early-gate defaults behave.
+      #   rbc_ref        branch to read bundle/bundle-patch.yaml from
+      #   operator_ref   branch to check out and commit back to
+      - name: Configure workflow parameters
+        id: config
+        env:
+          ORG: ${{ env.GITHUB_ORG }}
+          OPERATOR_REPO_NAME: ${{ env.OPERATOR_REPO_NAME }}
+          POC_BRANCH: ${{ env.POC_BRANCH }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BRANCH="${{ github.base_ref }}"
+            OPERATOR_REF="${{ github.head_ref }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+            OPERATOR_REF="${{ github.ref_name }}"
+          fi
+
+          if [[ "$BRANCH" =~ ^rhoai- ]]; then
+            RELEASE_BRANCH="$BRANCH"
+            RBC_REF="$BRANCH"
+          else
+            # Strip the rhoai- prefix before sorting: "rhoai-2" and "rhoai-3"
+            # both sort numerically as 0, so sorting whole branch names picks
+            # rhoai-2.25 over rhoai-3.5.  Majors are limited to 2 and 3 to
+            # match the push filters above and to skip placeholders like
+            # rhoai-99.99.
+            LATEST=$(git ls-remote --heads "https://github.com/${ORG}/${OPERATOR_REPO_NAME}.git" 'refs/heads/rhoai-*' \
+              | sed 's|.*refs/heads/rhoai-||' \
+              | grep -E '^[23]\.[0-9]+$' \
+              | sort -t. -k1,1n -k2,2n \
+              | tail -1)
+            if [[ -z "$LATEST" ]]; then
+              echo "::error::No rhoai-X.Y branches found. Cannot determine a default release branch."
+              exit 1
+            fi
+            RELEASE_BRANCH="rhoai-${LATEST}"
+            RBC_REF="$POC_BRANCH"
+            echo "::notice::Non-release branch '${BRANCH}' - version defaults to ${RELEASE_BRANCH}, RBC read from ${RBC_REF}"
+          fi
+
+          {
+            echo "branch=${BRANCH}"
+            echo "release_branch=${RELEASE_BRANCH}"
+            echo "rbc_ref=${RBC_REF}"
+            echo "operator_ref=${OPERATOR_REF}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Checkout RBC repo
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: ${{ env.GITHUB_ORG }}/RHOAI-Build-Config
-          ref: ${{ github.ref_name }}
+          repository: ${{ env.GITHUB_ORG }}/${{ env.RBC_REPO_NAME }}
+          ref: ${{ steps.config.outputs.rbc_ref }}
           path: RBC
           sparse-checkout: |
             bundle/bundle-patch.yaml
@@ -37,17 +119,17 @@ jobs:
       - name: Git checkout utils
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: ${{ env.GITHUB_ORG }}/RHOAI-Konflux-Automation
+          repository: ${{ env.GITHUB_ORG }}/${{ env.UTILS_REPO_NAME }}
           ref: main
           path: utils
           sparse-checkout: |
-            utils/processors
+            utils/operator-processor
           sparse-checkout-cone-mode: false
       - name: Git checkout operator repo
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: ${{ env.GITHUB_ORG }}/rhods-operator
-          ref: ${{ github.ref_name }}
+          repository: ${{ env.GITHUB_ORG }}/${{ env.OPERATOR_REPO_NAME }}
+          ref: ${{ steps.config.outputs.operator_ref }}
           path: rhods-operator
           sparse-checkout: |
             build
@@ -67,11 +149,63 @@ jobs:
           ln -s $yq_filename yq
           cp $yq_filename /usr/local/bin/yq
   
-          pip install --default-timeout=100 -r utils/utils/processors/requirements.txt
+          pip install --default-timeout=100 -r utils/utils/operator-processor/requirements.txt
+
+      # The processor reads image digests and git labels from Quay.  Quay's
+      # /api/v1 REST API only accepts OAuth application tokens, which the
+      # release robot cannot mint, so the processor uses the /v2/ registry API
+      # via skopeo instead - the same credential and approach as
+      # rhods-devops-infra tools/tracer.
+      - name: Authenticate to Quay registry
+        env:
+          QUAY_PULL_SECRET: ${{ secrets.QUAY_PULL_SECRET || secrets.RHOAI_QUAY_API_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if ! command -v skopeo >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq skopeo
+          fi
+          skopeo --version
+
+          if [[ -z "${QUAY_PULL_SECRET}" ]]; then
+            echo "::error::No Quay credentials. Set the QUAY_PULL_SECRET repository secret to the 'RHOAI Quay ReadOnly bot' pull secret."
+            exit 1
+          fi
+
+          AUTHFILE="${RUNNER_TEMP}/quay-auth.json"
+
+          # Accept whichever form the Bitwarden entry was copied in: a full
+          # .dockerconfigjson, a base64 'user:password', or a bare
+          # 'user:password'.  Nothing here echoes the credential.
+          if printf '%s' "${QUAY_PULL_SECRET}" | jq -e '.auths' >/dev/null 2>&1; then
+            echo "Credential recognised as .dockerconfigjson"
+            printf '%s' "${QUAY_PULL_SECRET}" > "${AUTHFILE}"
+          else
+            CREDS="${QUAY_PULL_SECRET}"
+            if [[ "${CREDS}" != *:* ]]; then
+              CREDS=$(printf '%s' "${CREDS}" | base64 -d 2>/dev/null || true)
+            fi
+            if [[ "${CREDS}" != *:* ]]; then
+              echo "::error::Credential is not .dockerconfigjson, base64 'user:password', or 'user:password'."
+              exit 1
+            fi
+            echo "Credential recognised as user:password"
+            printf '%s' "${CREDS#*:}" | skopeo login --authfile "${AUTHFILE}" \
+              -u "${CREDS%%:*}" --password-stdin quay.io
+          fi
+
+          chmod 600 "${AUTHFILE}"
+          echo "REGISTRY_AUTH_FILE=${AUTHFILE}" >> "$GITHUB_ENV"
 
       - name: Execute Operator Processor
         env:
-          BRANCH: ${{ github.ref_name }}
+          # release_branch, not the raw branch: the processor passes this
+          # straight to the Quay tag filter, so 'gap-poc' would match no tags.
+          BRANCH: ${{ steps.config.outputs.release_branch }}
+          # 'skopeo' uses the /v2/ registry API and REGISTRY_AUTH_FILE above.
+          # 'api' uses /api/v1 and needs a Quay OAuth application token.
+          QUAY_BACKEND: skopeo
           RHOAI_QUAY_API_TOKEN: ${{ secrets.RHOAI_QUAY_API_TOKEN }}
         run: |
           RHOAI_VERSION=v${BRANCH/rhoai-/}
@@ -84,7 +218,7 @@ jobs:
           NUDGING_YAML_PATH=rhods-operator/build/operator-nudging.yaml
           MANIFEST_CONFIG_PATH=rhods-operator/build/manifests-config.yaml
           
-          python3 utils/utils/processors/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} --push-pipeline-yaml-path ${PUSH_PIPELINE_PATH} --push-pipeline-operation enable
+          python3 utils/utils/operator-processor/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} --push-pipeline-yaml-path ${PUSH_PIPELINE_PATH} --push-pipeline-operation enable
           
       - name: Print debug logs
         if: always()
@@ -98,7 +232,7 @@ jobs:
 
       - name: Fetch all manifests
         env:
-          BRANCH: ${{ github.ref_name }}
+          BRANCH: ${{ steps.config.outputs.release_branch }}
         run: |
           #!/bin/bash
           set -e
@@ -202,7 +336,7 @@ jobs:
 
       - name: Fetch all charts
         env:
-          BRANCH: ${{ github.ref_name }}
+          BRANCH: ${{ steps.config.outputs.release_branch }}
         run: |
           #!/bin/bash
           set -e
@@ -279,7 +413,18 @@ jobs:
           git config user.name "Openshift-AI DevOps"
           git config user.email "openshift-ai-devops@redhat.com"
           git add -A
-          git diff --staged --quiet || (git commit -m "Updating the operator repo with latest images and manifests" && git push origin ${{ github.ref_name }})
+          git diff --staged --quiet || (git commit -m "Updating the operator repo with latest images and manifests" && git push origin HEAD:${{ steps.config.outputs.operator_ref }})
+
+      # PR-only: PaC triggers the pull-request pipeline off this comment
+      # (see .tekton/odh-operator-pull-request.yaml, on-comment annotation).
+      - name: Post /build-konflux comment on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --body '/build-konflux'
 
       - name: Upload debug logs
         if: always()

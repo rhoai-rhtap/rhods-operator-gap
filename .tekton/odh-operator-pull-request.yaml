@@ -2,15 +2,18 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/red-hat-data-services/rhods-operator?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/rhoai-rhtap/rhods-operator-gap?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     build.appstudio.redhat.com/pull_request_number: "{{pull_request_number}}"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
+    # Opt-in only.  'on-event: [pull_request]' used to make this fire on every
+    # PR event; with it gone the pipeline runs solely when the
+    # operator-processor workflow (or a human) posts /build-konflux, or when
+    # one of the labels below is applied.  on-target-branch is dropped with
+    # it - it only ever scoped the on-event matcher.
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
     pipelinesascode.tekton.dev/on-label: "[kfbuild-all, kfbuild-rhods-operator]"
-    pipelinesascode.tekton.dev/on-target-branch: "[{{target_branch}}]"
-    pipelinesascode.tekton.dev/on-event: "[pull_request]"
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
   labels:
     appstudio.openshift.io/application: automation
@@ -28,13 +31,19 @@ spec:
     value: '{{revision}}'
   - name: additional-tags
     value:
+    # Floating "latest build for this PR", so a consumer can track a PR
+    # without knowing the commit.
+    - 'odh-operator-pr-{{pull_request_number}}'
     - 'pr-{{pull_request_number}}-into-{{target_branch}}'
   - name: additional-labels
     value:
     - version=on-pr-{{revision}}
     - io.openshift.tags=odh-operator
+  # Carries the PR number as well as the commit.  The previous tag was keyed
+  # on {{revision}} alone, so the same commit built from two PRs (or from a
+  # branch and a PR) collided on one tag.
   - name: output-image
-    value: quay.io/rhoai/pull-request-pipelines:odh-operator-{{revision}}
+    value: quay.io/rhoai/pull-request-pipelines:odh-operator-pr-{{pull_request_number}}-{{revision}}
   - name: build-platforms
     value:
     - linux/x86_64
@@ -60,9 +69,11 @@ spec:
     resolver: git
     params:
     - name: url
-      value: https://github.com/red-hat-data-services/konflux-central.git
+      value: https://github.com/rhoai-rhtap/konflux-central-gap.git
+    # Pinned to main: the POC target branch (gap-poc) does not exist in
+    # konflux-central-gap, so '{{ target_branch }}' would not resolve.
     - name: revision
-      value: '{{ target_branch }}'
+      value: main
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
