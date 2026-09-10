@@ -42,7 +42,12 @@ concurrency:
 
 jobs:
   operator-processor:
-    if: ${{ github.ref_name != 'main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || ( github.event_name == 'push' && github.event.commits[0].author.name == 'konflux-internal-p02[bot]' )) }}
+    # The pull_request clause excludes github-actions[bot]: the commit-and-push
+    # step below writes to the PR head branch, and that push does raise a
+    # 'synchronize' event whose actor is the bot.  (Such runs currently land in
+    # 'action_required' in this repo, but that is an approval setting, not a
+    # guarantee - without this the workflow would re-enter itself.)
+    if: ${{ github.ref_name != 'main' && (github.event_name == 'workflow_dispatch' || ( github.event_name == 'pull_request' && github.actor != 'github-actions[bot]' ) || ( github.event_name == 'push' && github.event.commits[0].author.name == 'konflux-internal-p02[bot]' )) }}
     runs-on: ubuntu-latest
     steps:
       # Resolve every ref this run needs.
