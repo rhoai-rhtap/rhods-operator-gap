@@ -1,5 +1,6 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
+#
 metadata:
   annotations:
     build.appstudio.openshift.io/repo: https://github.com/rhoai-rhtap/rhods-operator-gap?rev={{revision}}
@@ -8,8 +9,22 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "gap-poc"
+    # Opt-in, not on-open.  Konflux generates
+    #   on-cel-expression: event == "pull_request" && target_branch == "gap-poc"
+    # which builds the moment a PR is opened - before operator-processor has
+    # resolved component digests and prefetched manifests.  That build is of
+    # the unpinned tree, and cancel-in-progress then throws it away as soon as
+    # the processor pushes.  Waiting for an explicit signal - the label below,
+    # which the workflow applies as its last step, or this comment from a human
+    # - means the only build that runs is the one against the pinned,
+    # prefetched tree.
+    pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
+    # The bot drives the build with this label, not the comment.  PaC runs an
+    # ACL check on the sender of a GitOps comment; github-actions[bot] is not
+    # an org member or collaborator, so its /build-konflux comments are denied
+    # - and because the sender type is "Bot", PaC skips posting the denial
+    # status too, so it fails silently.  A label carries no such check.
+    pipelinesascode.tekton.dev/on-label: "[gap-build-ready]"
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
@@ -17,15 +32,24 @@ metadata:
   name: rhods-operator-gap-on-pull-request
   namespace: rhoai-tenant
 spec:
+  # Parity with konflux-central's odh-operator-pull-request.yaml.  The Tekton
+  # default is 1h; a hermetic multi-arch build across four platforms can pass
+  # that on a slow arm64/s390x runner.
+  timeouts:
+    pipeline: 4h
   params:
   - name: git-url
     value: '{{source_url}}'
   - name: revision
     value: '{{revision}}'
+  # Carries the PR number as well as the commit, so the same commit built from
+  # two PRs does not collide on one tag.
   - name: output-image
-    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:on-pr-{{revision}}
+    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:on-pr-{{pull_request_number}}-{{revision}}
   - name: additional-tags
     value:
+    # Floating "latest build for this PR".
+    - 'on-pr-{{pull_request_number}}'
     - 'pr-{{pull_request_number}}-into-{{target_branch}}'
   - name: additional-labels
     value:
@@ -57,12 +81,23 @@ spec:
     params:
     - name: url
       value: https://github.com/red-hat-data-services/konflux-central.git
+    # Pinned to main.  Konflux generates '{{ target_branch }}', which works for
+    # rhoai-X.Y branches because konflux-central carries one branch per
+    # release - but there is no gap-poc branch there, so the resolver would
+    # 404 and the PipelineRun would never start.
     - name: revision
-      value: '{{ target_branch }}'
+      value: main
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pull-request-pipelines
+    # Must be the component's own SA.  konflux-central's
+    # odh-operator-pull-request.yaml uses build-pipeline-pull-request-pipelines
+    # because its component is pull-request-pipelines-odh-operator, and that SA
+    # carries the push credential for quay.io/rhoai/pull-request-pipelines.  It
+    # has none for quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap,
+    # so the build succeeds and then fails at push.  Konflux generated
+    # build-pipeline-rhods-operator-gap here; the push pipeline still uses it.
+    serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
   - name: git-auth
     secret:

@@ -32,6 +32,9 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  # 'gh label create' is a repository-level operation on the Issues API, so
+  # pull-requests: write alone does not cover it.
+  issues: write
 
 # PR only: a rapid re-push should supersede the in-flight run.  Non-PR runs
 # get a unique group (github.run_id) so push behaviour is unchanged - no
@@ -415,16 +418,36 @@ jobs:
           git add -A
           git diff --staged --quiet || (git commit -m "Updating the operator repo with latest images and manifests" && git push origin HEAD:${{ steps.config.outputs.operator_ref }})
 
-      # PR-only: PaC triggers the pull-request pipeline off this comment
-      # (see .tekton/odh-operator-pull-request.yaml, on-comment annotation).
-      - name: Post /build-konflux comment on PR
+      # PR-only: PaC triggers the pull-request pipeline off this label
+      # (see .tekton/rhods-operator-gap-pull-request.yaml, on-label annotation).
+      #
+      # A label rather than a /build-konflux comment: PaC ACL-checks the sender
+      # of a GitOps comment, and github-actions[bot] is neither an org member
+      # nor a collaborator, so its comments are rejected.  The rejection is
+      # silent - PaC skips posting the denial status when the sender is a Bot -
+      # which is why the earlier comment-based attempts produced no build and
+      # no error.  Humans can still comment /build-konflux; that path is
+      # unchanged and still works.
+      - name: Label PR to trigger the Konflux build
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          LABEL: gap-build-ready
         run: |
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" \
-            --body '/build-konflux'
+          set -euo pipefail
+
+          # Idempotent: the label may not exist yet on a fresh fork.
+          gh label create "${LABEL}" --repo "${GITHUB_REPOSITORY}" \
+            --color 0E8A16 \
+            --description "Processor has pinned digests; ready for the hermetic Konflux build" \
+            2>/dev/null || true
+
+          # PaC triggers on the 'labeled' action.  Re-adding a label that is
+          # already present is a no-op and emits no event, so a second
+          # processor run on the same PR would never build.  Remove first.
+          gh pr edit "${PR}" --repo "${GITHUB_REPOSITORY}" --remove-label "${LABEL}" 2>/dev/null || true
+          gh pr edit "${PR}" --repo "${GITHUB_REPOSITORY}" --add-label "${LABEL}"
 
       - name: Upload debug logs
         if: always()
