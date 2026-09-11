@@ -14,9 +14,10 @@ metadata:
     # which builds the moment a PR is opened - before operator-processor has
     # resolved component digests and prefetched manifests.  That build is of
     # the unpinned tree, and cancel-in-progress then throws it away as soon as
-    # the processor pushes.  Waiting for /build-konflux (which the workflow
-    # posts as its last step) means the only build that runs is the one
-    # against the pinned, prefetched tree.
+    # the processor pushes.  Waiting for an explicit signal - the label below,
+    # which the workflow applies as its last step, or this comment from a human
+    # - means the only build that runs is the one against the pinned,
+    # prefetched tree.
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
     # The bot drives the build with this label, not the comment.  PaC runs an
     # ACL check on the sender of a GitOps comment; github-actions[bot] is not

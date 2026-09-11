@@ -32,6 +32,9 @@ env:
 permissions:
   contents: write
   pull-requests: write
+  # 'gh label create' is a repository-level operation on the Issues API, so
+  # pull-requests: write alone does not cover it.
+  issues: write
 
 # PR only: a rapid re-push should supersede the in-flight run.  Non-PR runs
 # get a unique group (github.run_id) so push behaviour is unchanged - no
