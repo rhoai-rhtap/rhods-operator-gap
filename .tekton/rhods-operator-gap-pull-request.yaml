@@ -24,6 +24,11 @@ metadata:
   name: rhods-operator-gap-on-pull-request
   namespace: rhoai-tenant
 spec:
+  # Parity with konflux-central's odh-operator-pull-request.yaml.  The Tekton
+  # default is 1h; a hermetic multi-arch build across four platforms can pass
+  # that on a slow arm64/s390x runner.
+  timeouts:
+    pipeline: 4h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -77,7 +82,14 @@ spec:
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-pull-request-pipelines
+    # Must be the component's own SA.  konflux-central's
+    # odh-operator-pull-request.yaml uses build-pipeline-pull-request-pipelines
+    # because its component is pull-request-pipelines-odh-operator, and that SA
+    # carries the push credential for quay.io/rhoai/pull-request-pipelines.  It
+    # has none for quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap,
+    # so the build succeeds and then fails at push.  Konflux generated
+    # build-pipeline-rhods-operator-gap here; the push pipeline still uses it.
+    serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
   - name: git-auth
     secret:
