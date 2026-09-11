@@ -18,6 +18,12 @@ metadata:
     # posts as its last step) means the only build that runs is the one
     # against the pinned, prefetched tree.
     pipelinesascode.tekton.dev/on-comment: "^/build-konflux"
+    # The bot drives the build with this label, not the comment.  PaC runs an
+    # ACL check on the sender of a GitOps comment; github-actions[bot] is not
+    # an org member or collaborator, so its /build-konflux comments are denied
+    # - and because the sender type is "Bot", PaC skips posting the denial
+    # status too, so it fails silently.  A label carries no such check.
+    pipelinesascode.tekton.dev/on-label: "[gap-build-ready]"
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
