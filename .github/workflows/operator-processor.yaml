@@ -2,7 +2,6 @@ name: Operator Processor
 
 on:
   workflow_dispatch:
-  ##test1
   push:
     branches:
       - 'rhoai-[23].[0-9]'  # e.g. rhoai-2.1, rhoai-3.1, rhoai-3.4
