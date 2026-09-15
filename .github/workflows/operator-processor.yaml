@@ -14,6 +14,7 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - gap-poc
+      - gap1-poc
 
 
 env:
@@ -85,7 +86,6 @@ jobs:
             # both sort numerically as 0, so sorting whole branch names picks
             # rhoai-2.25 over rhoai-3.5.  Majors are limited to 2 and 3 to
             # match the push filters above and to skip placeholders like
-            # rhoai-99.99.
             LATEST=$(git ls-remote --heads "https://github.com/${ORG}/${OPERATOR_REPO_NAME}.git" 'refs/heads/rhoai-*' \
               | sed 's|.*refs/heads/rhoai-||' \
               | grep -E '^[23]\.[0-9]+$' \
