@@ -2,7 +2,7 @@ Hermetic Operator PR Builds  - Implementation Plan
 Jira: RHOAIENG-87557
 Design Doc: Gated Artifacts-Promoter (GAP)
 
-Summary:
+##Summary:
 Enable operator-processor
 To trigger on PR events, limited to specific branches
 Handle the PR event specific logic to add the comment on the PR to trigger the tekton build
