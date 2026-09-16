@@ -237,3 +237,5 @@ relatedImages:
   value: quay.io/rhoai/odh-workload-variant-autoscaler-controller-rhel9@sha256:886179f3dfdce4bcc7bdd2091e7771b551d7172428dcf8b031047eb21969e458
 - name: RELATED_IMAGE_OSE_KUBE_RBAC_PROXY_IMAGE
   value: quay.io/rhoai/odh-kube-auth-proxy-rhel9@sha256:387a87bc5908c7b0a73c4c13b3b8727245113c9270d6e4ae659dd72f8f73f764
+- name: RELATED_IMAGE_ODH_OPERATOR_IMAGE
+  value: quay.io/rhoai/odh-rhel9-operator@sha256:d9f8313e98316ac5d3643a5745448ad2a46324da8596bfb07703e3d7870f5c23
