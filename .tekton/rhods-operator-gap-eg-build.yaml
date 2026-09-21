@@ -1,0 +1,51 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-event: "[issue_comment]"
+    pipelinesascode.tekton.dev/on-comment: "^/test rhods-operator-gap-eg-build"
+  labels:
+    appstudio.openshift.io/application: gap-poc
+    appstudio.openshift.io/component: rhods-operator-gap
+    pipelines.appstudio.openshift.io/type: build
+  name: rhods-operator-gap-eg-build
+  namespace: rhoai-tenant
+spec:
+  params:
+  - name: git-url
+    value: '{{source_url}}'
+  - name: revision
+    value: '{{revision}}'
+  - name: output-image
+    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
+  - name: dockerfile
+    value: Dockerfiles/Dockerfile.konflux
+  - name: path-context
+    value: .
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/rhoai-rhtap/konflux-central.git
+    - name: revision
+      value: 'main'
+    - name: pathInRepo
+      value: early-gate/eg-operator-build.yaml
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-rhods-operator-gap
+  workspaces:
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
+  - name: workspace
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+status: {}
