@@ -2,6 +2,22 @@ name: Operator Processor
 
 on:
   workflow_dispatch:
+    inputs:
+      eg-mode:
+        description: "Set to true when triggered from EG pipeline"
+        required: false
+        default: "false"
+        type: string
+      eg-branch:
+        description: "Ephemeral branch name, eg-<leader-pr-number> (e.g. eg-44)"
+        required: false
+        default: ""
+        type: string
+      leader-pr-number:
+        description: "Leader PR number for tagging"
+        required: false
+        default: ""
+        type: string
   ##test1
   push:
     branches:
@@ -70,7 +86,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          # EG mode override.  Chained with the event-derived refs below rather
+          # than standing alone: those assignments are unconditional, so a plain
+          # 'if' here would be overwritten on every EG run.
+          if [[ "${{ inputs.eg-mode }}" == "true" ]]; then
+            if [[ -z "${{ inputs.eg-branch }}" ]]; then
+              echo "::error::eg-mode is true but eg-branch is empty. Pass the ephemeral branch name eg-<leader-pr-number> (e.g. eg-44)."
+              exit 1
+            fi
+            BRANCH="${{ inputs.eg-branch }}"
+            OPERATOR_REF="${{ inputs.eg-branch }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BRANCH="${{ github.base_ref }}"
             OPERATOR_REF="${{ github.head_ref }}"
           else
@@ -427,6 +453,17 @@ jobs:
           gh pr comment "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
             --body '/build-konflux'
+
+      - name: Post /test comment for EG build
+        if: inputs.eg-mode == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RHODS_CI_BOT_TOKEN }}
+        run: |
+          LATEST_SHA=$(git -C "${{ github.workspace }}/rhods-operator" \
+            rev-parse HEAD)
+          gh api \
+            "repos/${{ github.repository }}/commits/${LATEST_SHA}/comments" \
+            -f body="/test rhods-operator-gap-eg-build"
 
       - name: Upload debug logs
         if: always()
