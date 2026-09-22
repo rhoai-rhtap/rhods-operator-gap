@@ -48,18 +48,19 @@ spec:
   - name: git-auth
     secret:
       secretName: '{{ git_auth_secret }}'
-  # create-ephemeral-branch, trigger-operator-processor and get-latest-commit
-  # all read $(workspaces.github-credentials.path)/token, so the key has to be
-  # projected to the filename 'token'.  PaC names it 'git-provider-token' in
-  # the git_auth_secret, so mounting that secret unprojected yields no 'token'
-  # file at all.  The workspace is optional in the pipeline, which is why
-  # omitting it fails inside the task rather than at PipelineRun admission.
+  # Deliberately not git_auth_secret.  create-ephemeral-branch,
+  # trigger-operator-processor and get-latest-commit all read
+  # $(workspaces.github-credentials.path)/token, and the last two call the
+  # GitHub API - trigger-operator-processor dispatches a workflow, which needs
+  # actions:write.  The PaC token in git_auth_secret is minted from the PaC
+  # GitHub App installation for git operations and does not carry that scope,
+  # so git_auth_secret is kept for the clone (git-auth above) only.
+  #
+  # eg-github-token is a separately-created secret in rhoai-tenant whose key is
+  # already named 'token', so no items: projection is needed here.
   - name: github-credentials
     secret:
-      secretName: '{{ git_auth_secret }}'
-      items:
-      - key: git-provider-token
-        path: token
+      secretName: eg-github-token
   - name: workspace
     volumeClaimTemplate:
       spec:
