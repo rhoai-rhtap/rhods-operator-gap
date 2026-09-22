@@ -25,6 +25,14 @@ spec:
     value: Dockerfiles/Dockerfile.konflux
   - name: path-context
     value: .
+  - name: enable-eg-orchestration
+    value: "true"
+  - name: leader-pr-number
+    value: "test-999"
+  - name: operator-repo
+    value: "rhoai-rhtap/rhods-operator-gap"
+  - name: source-branch
+    value: "stable"
   pipelineRef:
     resolver: git
     params:
@@ -60,4 +68,7 @@ spec:
         resources:
           requests:
             storage: 1Gi
+  - name: github-credentials
+    secret:
+      secretName: '{{ git_auth_secret }}'
 status: {}
