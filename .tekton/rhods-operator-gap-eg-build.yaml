@@ -68,7 +68,4 @@ spec:
         resources:
           requests:
             storage: 1Gi
-  - name: github-credentials
-    secret:
-      secretName: '{{ git_auth_secret }}'
 status: {}
