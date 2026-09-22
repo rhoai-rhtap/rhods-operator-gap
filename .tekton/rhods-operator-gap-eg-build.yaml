@@ -40,6 +40,18 @@ spec:
   - name: git-auth
     secret:
       secretName: '{{ git_auth_secret }}'
+  # create-ephemeral-branch, trigger-operator-processor and get-latest-commit
+  # all read $(workspaces.github-credentials.path)/token, so the key has to be
+  # projected to the filename 'token'.  PaC names it 'git-provider-token' in
+  # the git_auth_secret, so mounting that secret unprojected yields no 'token'
+  # file at all.  The workspace is optional in the pipeline, which is why
+  # omitting it fails inside the task rather than at PipelineRun admission.
+  - name: github-credentials
+    secret:
+      secretName: '{{ git_auth_secret }}'
+      items:
+      - key: git-provider-token
+        path: token
   - name: workspace
     volumeClaimTemplate:
       spec:
