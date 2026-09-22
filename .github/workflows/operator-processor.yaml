@@ -454,16 +454,13 @@ jobs:
             --repo "${{ github.repository }}" \
             --body '/build-konflux'
 
-      - name: Post /test comment for EG build
-        if: inputs.eg-mode == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RHODS_CI_BOT_TOKEN }}
-        run: |
-          LATEST_SHA=$(git -C "${{ github.workspace }}/rhods-operator" \
-            rev-parse HEAD)
-          gh api \
-            "repos/${{ github.repository }}/commits/${LATEST_SHA}/comments" \
-            -f body="/test rhods-operator-gap-eg-build"
+      # There is deliberately no EG equivalent of the step above.  In EG mode
+      # this workflow is dispatched from the combined pipeline in
+      # rhoai-rhtap/konflux-central (early-gate/eg-operator-build.yaml), whose
+      # clone/prefetch/buildah tasks run after trigger-operator-processor
+      # returns - the build is the next task in the same PipelineRun, not a
+      # separate one.  Posting /test here would start a second, redundant
+      # build of the same commit.
 
       - name: Upload debug logs
         if: always()
