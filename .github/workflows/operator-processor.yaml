@@ -2,6 +2,22 @@ name: Operator Processor
 
 on:
   workflow_dispatch:
+    inputs:
+      eg-mode:
+        description: "Set to true when triggered from EG pipeline"
+        required: false
+        default: "false"
+        type: string
+      eg-branch:
+        description: "Ephemeral branch name, eg-<leader-pr-number> (e.g. eg-44)"
+        required: false
+        default: ""
+        type: string
+      leader-pr-number:
+        description: "Leader PR number for tagging"
+        required: false
+        default: ""
+        type: string
   push:
     branches:
       - 'rhoai-[23].[0-9]'  # e.g. rhoai-2.1, rhoai-3.1, rhoai-3.4
