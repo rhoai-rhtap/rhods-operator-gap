@@ -28,7 +28,7 @@ spec:
   - name: enable-eg-orchestration
     value: "true"
   - name: leader-pr-number
-    value: "4"
+    value: "6"
   - name: leader-pr-repo
     value: "red-hat-data-services/gated-artifacts-promoter"
   - name: operator-repo
