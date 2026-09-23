@@ -245,7 +245,19 @@ jobs:
           NUDGING_YAML_PATH=rhods-operator/build/operator-nudging.yaml
           MANIFEST_CONFIG_PATH=rhods-operator/build/manifests-config.yaml
           
-          python3 utils/utils/operator-processor/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} --push-pipeline-yaml-path ${PUSH_PIPELINE_PATH} --push-pipeline-operation enable
+          # Enabling the release push pipeline is release management, and an EG
+          # run is not a release.  Its ephemeral branch is deleted as soon as the
+          # build finishes, so the edit would land on a throwaway ref; the push
+          # pipeline's own CEL requires target_branch == rhoai-X.Y, which an eg-*
+          # branch never satisfies; and when the ephemeral branch is forked from
+          # main the file is not present at all.
+          PUSH_PIPELINE_ARGS=(--push-pipeline-yaml-path "${PUSH_PIPELINE_PATH}" --push-pipeline-operation enable)
+          if [[ "${{ inputs.eg-mode }}" == "true" ]]; then
+            echo "EG mode - leaving ${PUSH_PIPELINE_PATH} alone"
+            PUSH_PIPELINE_ARGS=()
+          fi
+
+          python3 utils/utils/operator-processor/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} "${PUSH_PIPELINE_ARGS[@]}"
           
       - name: Print debug logs
         if: always()
