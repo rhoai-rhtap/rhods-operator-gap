@@ -28,9 +28,14 @@ spec:
   - name: enable-eg-orchestration
     value: "true"
   - name: leader-pr-number
-    value: "test-999"
+    value: "4"
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
+  # Fallback only.  check-leader-pr derives the real value from the leader PR -
+  # main when it carries an operator child PR, stable otherwise - and this is
+  # used only when that lookup fails.
   - name: source-branch
     value: "stable"
   pipelineRef:
