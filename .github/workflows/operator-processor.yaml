@@ -2,6 +2,22 @@ name: Operator Processor
 
 on:
   workflow_dispatch:
+    inputs:
+      eg-mode:
+        description: "Set to true when triggered from EG pipeline"
+        required: false
+        default: "false"
+        type: string
+      eg-branch:
+        description: "Ephemeral branch name, eg-<leader-pr-number> (e.g. eg-44)"
+        required: false
+        default: ""
+        type: string
+      leader-pr-number:
+        description: "Leader PR number for tagging"
+        required: false
+        default: ""
+        type: string
   ##test1
   push:
     branches:
@@ -70,7 +86,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          # EG mode override.  Chained with the event-derived refs below rather
+          # than standing alone: those assignments are unconditional, so a plain
+          # 'if' here would be overwritten on every EG run.
+          if [[ "${{ inputs.eg-mode }}" == "true" ]]; then
+            if [[ -z "${{ inputs.eg-branch }}" ]]; then
+              echo "::error::eg-mode is true but eg-branch is empty. Pass the ephemeral branch name eg-<leader-pr-number> (e.g. eg-44)."
+              exit 1
+            fi
+            BRANCH="${{ inputs.eg-branch }}"
+            OPERATOR_REF="${{ inputs.eg-branch }}"
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BRANCH="${{ github.base_ref }}"
             OPERATOR_REF="${{ github.head_ref }}"
           else
@@ -131,6 +157,16 @@ jobs:
         with:
           repository: ${{ env.GITHUB_ORG }}/${{ env.OPERATOR_REPO_NAME }}
           ref: ${{ steps.config.outputs.operator_ref }}
+          # EG runs push with the bot PAT instead of the default GITHUB_TOKEN.
+          # The pinned-digest commit this job pushes is the thing the early-gate
+          # build is supposed to build, so that push has to be seen by the
+          # outside world; a GITHUB_TOKEN push is deliberately muted by GitHub.
+          #
+          # Scoped to EG mode on purpose.  Release runs push to rhoai-X.Y, and
+          # this very workflow triggers on push to rhoai-X.Y - giving those
+          # pushes a PAT would make the processor retrigger itself forever.
+          # No workflow triggers on eg-*, so the EG path cannot loop.
+          token: ${{ inputs.eg-mode == 'true' && secrets.RHODS_CI_BOT_TOKEN || github.token }}
           path: rhods-operator
           sparse-checkout: |
             build
@@ -219,7 +255,19 @@ jobs:
           NUDGING_YAML_PATH=rhods-operator/build/operator-nudging.yaml
           MANIFEST_CONFIG_PATH=rhods-operator/build/manifests-config.yaml
           
-          python3 utils/utils/operator-processor/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} --push-pipeline-yaml-path ${PUSH_PIPELINE_PATH} --push-pipeline-operation enable
+          # Enabling the release push pipeline is release management, and an EG
+          # run is not a release.  Its ephemeral branch is deleted as soon as the
+          # build finishes, so the edit would land on a throwaway ref; the push
+          # pipeline's own CEL requires target_branch == rhoai-X.Y, which an eg-*
+          # branch never satisfies; and when the ephemeral branch is forked from
+          # main the file is not present at all.
+          PUSH_PIPELINE_ARGS=(--push-pipeline-yaml-path "${PUSH_PIPELINE_PATH}" --push-pipeline-operation enable)
+          if [[ "${{ inputs.eg-mode }}" == "true" ]]; then
+            echo "EG mode - leaving ${PUSH_PIPELINE_PATH} alone"
+            PUSH_PIPELINE_ARGS=()
+          fi
+
+          python3 utils/utils/operator-processor/operator-processor.py  -op process-operator-yamls --patch-yaml-path ${PATCH_YAML_PATH} --operands-map-path ${OPERANDS_MAP_PATH} --nudging-yaml-path ${NUDGING_YAML_PATH} --manifest-config-path ${MANIFEST_CONFIG_PATH} --rhoai-version ${BRANCH} "${PUSH_PIPELINE_ARGS[@]}"
           
       - name: Print debug logs
         if: always()
@@ -427,6 +475,14 @@ jobs:
           gh pr comment "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
             --body '/build-konflux'
+
+      # There is deliberately no EG equivalent of the step above.  In EG mode
+      # this workflow is dispatched from the combined pipeline in
+      # rhoai-rhtap/konflux-central (early-gate/eg-operator-build.yaml), whose
+      # clone/prefetch/buildah tasks run after trigger-operator-processor
+      # returns - the build is the next task in the same PipelineRun, not a
+      # separate one.  Posting /test here would start a second, redundant
+      # build of the same commit.
 
       - name: Upload debug logs
         if: always()

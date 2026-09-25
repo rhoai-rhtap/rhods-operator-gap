@@ -1,0 +1,72 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    pipelinesascode.tekton.dev/on-event: "[issue_comment]"
+    pipelinesascode.tekton.dev/on-comment: "^/test rhods-operator-gap-eg-build"
+  labels:
+    appstudio.openshift.io/application: gap-poc
+    appstudio.openshift.io/component: rhods-operator-gap
+    pipelines.appstudio.openshift.io/type: build
+  name: rhods-operator-gap-eg-build
+  namespace: rhoai-tenant
+spec:
+  params:
+  - name: git-url
+    value: '{{source_url}}'
+  - name: revision
+    value: '{{revision}}'
+  - name: output-image
+    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
+  - name: dockerfile
+    value: Dockerfiles/Dockerfile.konflux
+  - name: path-context
+    value: .
+  - name: enable-eg-orchestration
+    value: "true"
+  - name: leader-pr-number
+    value: "test-999"
+  - name: operator-repo
+    value: "rhoai-rhtap/rhods-operator-gap"
+  - name: source-branch
+    value: "stable"
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/rhoai-rhtap/konflux-central.git
+    - name: revision
+      value: 'main'
+    - name: pathInRepo
+      value: early-gate/eg-operator-build.yaml
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-rhods-operator-gap
+  workspaces:
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
+  # Deliberately not git_auth_secret.  create-ephemeral-branch,
+  # trigger-operator-processor and get-latest-commit all read
+  # $(workspaces.github-credentials.path)/token, and the last two call the
+  # GitHub API - trigger-operator-processor dispatches a workflow, which needs
+  # actions:write.  The PaC token in git_auth_secret is minted from the PaC
+  # GitHub App installation for git operations and does not carry that scope,
+  # so git_auth_secret is kept for the clone (git-auth above) only.
+  #
+  # eg-github-token is a separately-created secret in rhoai-tenant whose key is
+  # already named 'token', so no items: projection is needed here.
+  - name: github-credentials
+    secret:
+      secretName: eg-github-token
+  - name: workspace
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+status: {}
