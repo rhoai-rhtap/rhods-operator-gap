@@ -1,0 +1,74 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    # Fires on every push to an open PR against main or stable.  This run does
+    # not build anything itself - it orchestrates: it reads the leader PR,
+    # forks an ephemeral eg-* branch from main or stable accordingly, kicks
+    # operator-processor at it, and then watches for the PaC build that
+    # rhods-operator-gap-eg-push.yaml starts once the processor has pinned the
+    # component digests.
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "pull_request"
+      && (target_branch == "main" || target_branch == "stable")
+  labels:
+    appstudio.openshift.io/application: gap-poc
+    appstudio.openshift.io/component: rhods-operator-gap
+    pipelines.appstudio.openshift.io/type: build
+  name: rhods-operator-gap-eg-build
+  namespace: rhoai-tenant
+spec:
+  timeouts:
+    pipeline: 3h
+  params:
+  # The leader PR the gate is running for.  gated-artifacts-promoter lives in
+  # red-hat-data-services, not rhoai-rhtap - only the component PRs it lists
+  # are rhoai-rhtap repos.
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
+  # Hardcoded for the POC.  Leader PR #4 lists rhods-operator-gap among its
+  # child PRs, so check-leader-pr resolves source-branch=main; #5 lists four
+  # components and no operator, so it resolves source-branch=stable.  Once the
+  # Leader PR Manager drives this, it supplies the number.
+  - name: leader-pr-number
+    value: "4"
+  - name: operator-repo
+    value: "rhoai-rhtap/rhods-operator-gap"
+  # The snapshot block cannot complete yet: generate-snapshot resolves digests
+  # through the anonymous Quay API and quay.io/rhoai is private, and
+  # resolve-group-configuration requires the leader repo to be in
+  # component_repo_map.json, which gated-artifacts-promoter is not.  See
+  # rhoai-rhtap/konflux-central#19.  check-leader-pr onward is unaffected - it
+  # orders after audit-snapshot but consumes none of its results.
+  - name: enable-group-snapshot
+    value: "false"
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/rhoai-rhtap/konflux-central.git
+    # Pinned to main rather than '{{ target_branch }}': target_branch here is a
+    # branch of the operator repo and would never resolve against this one.
+    - name: revision
+      value: 'main'
+    - name: pathInRepo
+      value: early-gate/early-gate-component-pipeline.yaml
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-rhods-operator-gap
+  workspaces:
+  # Deliberately not git_auth_secret.  check-leader-pr, fork-operator-branch
+  # and trigger-operator-processor-on-ephemeral-branch all read
+  # $(workspaces.github-credentials.path)/token, and the last dispatches a
+  # workflow, which needs actions:write.  The PaC token is minted from the PaC
+  # GitHub App installation for git operations and does not carry that scope.
+  #
+  # eg-github-token is a separately-created secret in rhoai-tenant whose single
+  # key is already named 'token', so no items: projection is needed here.
+  - name: github-credentials
+    secret:
+      secretName: eg-github-token
+status: {}
