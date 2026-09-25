@@ -157,6 +157,16 @@ jobs:
         with:
           repository: ${{ env.GITHUB_ORG }}/${{ env.OPERATOR_REPO_NAME }}
           ref: ${{ steps.config.outputs.operator_ref }}
+          # EG runs push with the bot PAT instead of the default GITHUB_TOKEN.
+          # The pinned-digest commit this job pushes is the thing the early-gate
+          # build is supposed to build, so that push has to be seen by the
+          # outside world; a GITHUB_TOKEN push is deliberately muted by GitHub.
+          #
+          # Scoped to EG mode on purpose.  Release runs push to rhoai-X.Y, and
+          # this very workflow triggers on push to rhoai-X.Y - giving those
+          # pushes a PAT would make the processor retrigger itself forever.
+          # No workflow triggers on eg-*, so the EG path cannot loop.
+          token: ${{ inputs.eg-mode == 'true' && secrets.RHODS_CI_BOT_TOKEN || github.token }}
           path: rhods-operator
           sparse-checkout: |
             build
