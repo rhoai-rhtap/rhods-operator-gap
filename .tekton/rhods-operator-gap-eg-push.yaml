@@ -47,6 +47,13 @@ spec:
     - '{{target_branch}}-{{revision}}'
   - name: output-image
     value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
+  # rhoai-init hard-fails a non-pull_request run with an empty rhoai-version
+  # ("ERROR: RHOAI version is required but was not provided").  An early-gate
+  # run is a push, so it has to supply one.  3.6.0 is what the release
+  # pipeline for this component passes; here it only feeds the image labels
+  # (version=v3.6.0) and the CPE id, neither of which the gate acts on.
+  - name: rhoai-version
+    value: "3.6.0"
   - name: dockerfile
     value: Dockerfiles/Dockerfile.konflux
   - name: path-context
