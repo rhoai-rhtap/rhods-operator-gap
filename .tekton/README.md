@@ -39,3 +39,5 @@ git push origin main
 ```
 
 - Once pushed, automation will automatically sync your updates to the corresponding component repository.
+
+<!-- EG component-pipeline test A (leader PR #4, expect fork from main) - 2026-09-25T11:17:46Z -->
