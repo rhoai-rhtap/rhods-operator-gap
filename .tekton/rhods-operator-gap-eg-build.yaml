@@ -4,9 +4,17 @@ metadata:
   annotations:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-event: "[issue_comment]"
-    pipelinesascode.tekton.dev/on-comment: "^/test rhods-operator-gap-eg-build"
+    # Fires on every push to an open PR against main or stable.  This run does
+    # not build anything itself - it orchestrates: it reads the leader PR,
+    # forks an ephemeral eg-* branch from main or stable accordingly, kicks
+    # operator-processor at it, and then watches for the PaC build that
+    # rhods-operator-gap-eg-push.yaml starts once the processor has pinned the
+    # component digests.
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "pull_request"
+      && (target_branch == "main" || target_branch == "stable")
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
@@ -14,59 +22,63 @@ metadata:
   name: rhods-operator-gap-eg-build
   namespace: rhoai-tenant
 spec:
+  timeouts:
+    pipeline: 3h
   params:
-  - name: git-url
-    value: '{{source_url}}'
-  - name: revision
-    value: '{{revision}}'
-  - name: output-image
-    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
-  - name: dockerfile
-    value: Dockerfiles/Dockerfile.konflux
-  - name: path-context
-    value: .
-  - name: enable-eg-orchestration
-    value: "true"
+  # The leader PR the gate is running for.  gated-artifacts-promoter lives in
+  # red-hat-data-services, not rhoai-rhtap - only the component PRs it lists
+  # are rhoai-rhtap repos.
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
+  # Hardcoded for the POC.  Leader PR #4 lists rhods-operator-gap among its
+  # child PRs, so resolve-group-configuration resolves source-branch=main; #5
+  # lists four components and no operator, so it resolves source-branch=stable.
+  # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
-    value: "test-999"
+    value: "4"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
-  - name: source-branch
-    value: "stable"
+  # enable-group-snapshot used to be set to "false" here, because the snapshot
+  # block could not complete: generate-snapshot resolved digests through the
+  # anonymous Quay API against a private quay.io/rhoai, and
+  # resolve-group-configuration exited 1 because gated-artifacts-promoter is
+  # absent from component_repo_map.json.  Both are fixed - the snapshot now
+  # authenticates with the read-only robot below, and an unresolvable leader
+  # repo yields an empty group instead of a failure - so the block runs
+  # unconditionally and the parameter no longer exists.
   pipelineRef:
     resolver: git
     params:
     - name: url
       value: https://github.com/rhoai-rhtap/konflux-central.git
+    # Pinned to main rather than '{{ target_branch }}': target_branch here is a
+    # branch of the operator repo and would never resolve against this one.
     - name: revision
       value: 'main'
     - name: pathInRepo
-      value: early-gate/eg-operator-build.yaml
+      value: early-gate/early-gate-component-pipeline.yaml
   taskRunTemplate:
     serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
-  - name: git-auth
-    secret:
-      secretName: '{{ git_auth_secret }}'
-  # Deliberately not git_auth_secret.  create-ephemeral-branch,
-  # trigger-operator-processor and get-latest-commit all read
-  # $(workspaces.github-credentials.path)/token, and the last two call the
-  # GitHub API - trigger-operator-processor dispatches a workflow, which needs
-  # actions:write.  The PaC token in git_auth_secret is minted from the PaC
-  # GitHub App installation for git operations and does not carry that scope,
-  # so git_auth_secret is kept for the clone (git-auth above) only.
+  # Deliberately not git_auth_secret.  resolve-group-configuration,
+  # fork-operator-branch, trigger-operator-processor-on-ephemeral-branch and
+  # monitor-operator-build all read $(workspaces.github-credentials.path)/token,
+  # and the third of those dispatches a workflow, which needs actions:write.
+  # The PaC token is minted from the PaC GitHub App installation for git
+  # operations and does not carry that scope.
   #
-  # eg-github-token is a separately-created secret in rhoai-tenant whose key is
-  # already named 'token', so no items: projection is needed here.
+  # eg-github-token is a separately-created secret in rhoai-tenant whose single
+  # key is already named 'token', so no items: projection is needed here.
   - name: github-credentials
     secret:
       secretName: eg-github-token
-  - name: workspace
-    volumeClaimTemplate:
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
+  # The RHOAI Quay read-only robot, consumed by generate-snapshot.  quay.io/rhoai
+  # is private, so without it the snapshot resolves no component digests at all.
+  #
+  # A dockerconfigjson secret projects its key verbatim, which is what the task
+  # looks for - it reads $(workspaces.basic-auth.path)/.dockerconfigjson and
+  # hands it to skopeo as --authfile - so again no items: projection.
+  - name: quay-credentials
+    secret:
+      secretName: rhoai-quay-gap-ro
 status: {}
