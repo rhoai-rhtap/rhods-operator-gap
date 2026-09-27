@@ -31,21 +31,21 @@ spec:
   - name: leader-pr-repo
     value: "red-hat-data-services/gated-artifacts-promoter"
   # Hardcoded for the POC.  Leader PR #4 lists rhods-operator-gap among its
-  # child PRs, so check-leader-pr resolves source-branch=main; #5 lists four
-  # components and no operator, so it resolves source-branch=stable.  Once the
-  # Leader PR Manager drives this, it supplies the number.
+  # child PRs, so resolve-group-configuration resolves source-branch=main; #5
+  # lists four components and no operator, so it resolves source-branch=stable.
+  # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
     value: "4"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
-  # The snapshot block cannot complete yet: generate-snapshot resolves digests
-  # through the anonymous Quay API and quay.io/rhoai is private, and
-  # resolve-group-configuration requires the leader repo to be in
-  # component_repo_map.json, which gated-artifacts-promoter is not.  See
-  # rhoai-rhtap/konflux-central#19.  check-leader-pr onward is unaffected - it
-  # orders after audit-snapshot but consumes none of its results.
-  - name: enable-group-snapshot
-    value: "false"
+  # enable-group-snapshot used to be set to "false" here, because the snapshot
+  # block could not complete: generate-snapshot resolved digests through the
+  # anonymous Quay API against a private quay.io/rhoai, and
+  # resolve-group-configuration exited 1 because gated-artifacts-promoter is
+  # absent from component_repo_map.json.  Both are fixed - the snapshot now
+  # authenticates with the read-only robot below, and an unresolvable leader
+  # repo yields an empty group instead of a failure - so the block runs
+  # unconditionally and the parameter no longer exists.
   pipelineRef:
     resolver: git
     params:
@@ -60,15 +60,25 @@ spec:
   taskRunTemplate:
     serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
-  # Deliberately not git_auth_secret.  check-leader-pr, fork-operator-branch
-  # and trigger-operator-processor-on-ephemeral-branch all read
-  # $(workspaces.github-credentials.path)/token, and the last dispatches a
-  # workflow, which needs actions:write.  The PaC token is minted from the PaC
-  # GitHub App installation for git operations and does not carry that scope.
+  # Deliberately not git_auth_secret.  resolve-group-configuration,
+  # fork-operator-branch, trigger-operator-processor-on-ephemeral-branch and
+  # monitor-operator-build all read $(workspaces.github-credentials.path)/token,
+  # and the third of those dispatches a workflow, which needs actions:write.
+  # The PaC token is minted from the PaC GitHub App installation for git
+  # operations and does not carry that scope.
   #
   # eg-github-token is a separately-created secret in rhoai-tenant whose single
   # key is already named 'token', so no items: projection is needed here.
   - name: github-credentials
     secret:
       secretName: eg-github-token
+  # The RHOAI Quay read-only robot, consumed by generate-snapshot.  quay.io/rhoai
+  # is private, so without it the snapshot resolves no component digests at all.
+  #
+  # A dockerconfigjson secret projects its key verbatim, which is what the task
+  # looks for - it reads $(workspaces.basic-auth.path)/.dockerconfigjson and
+  # hands it to skopeo as --authfile - so again no items: projection.
+  - name: quay-credentials
+    secret:
+      secretName: rhoai-quay-gap-ro
 status: {}
