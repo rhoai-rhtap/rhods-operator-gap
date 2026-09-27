@@ -35,9 +35,14 @@ spec:
   # lists four components and no operator, so it resolves source-branch=stable.
   # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
-    value: "4"
+    value: "5"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
+  # TEST ONLY: resolve the task definitions from the same unmerged branch the
+  # pipeline body comes from, so the run exercises konflux-central#26 end to
+  # end rather than a new pipeline calling the old tasks.
+  - name: konflux-central-revision
+    value: "eg-single-entry-point"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
@@ -54,7 +59,7 @@ spec:
     # Pinned to main rather than '{{ target_branch }}': target_branch here is a
     # branch of the operator repo and would never resolve against this one.
     - name: revision
-      value: 'main'
+      value: 'eg-single-entry-point'
     - name: pathInRepo
       value: early-gate/early-gate-component-pipeline.yaml
   taskRunTemplate:
