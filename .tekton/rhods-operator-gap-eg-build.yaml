@@ -82,3 +82,5 @@ spec:
     secret:
       secretName: rhoai-quay-gap-ro
 status: {}
+
+# TEST A: leader PR #4 (operator-PR-included -> fork from main)
