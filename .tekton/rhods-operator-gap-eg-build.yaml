@@ -35,7 +35,7 @@ spec:
   # lists four components and no operator, so it resolves source-branch=stable.
   # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
-    value: "4"
+    value: "5"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
