@@ -457,31 +457,47 @@ jobs:
 
       - name: Commit and push the changes to release branch
         working-directory: rhods-operator
+        env:
+          EG_MODE: ${{ inputs.eg-mode }}
+          TARGET_REF: ${{ steps.config.outputs.operator_ref }}
         run: |
+          set -euo pipefail
+
           git config user.name "Openshift-AI DevOps"
           git config user.email "openshift-ai-devops@redhat.com"
           git add -A
-          git diff --staged --quiet || (git commit -m "Updating the operator repo with latest images and manifests" && git push origin HEAD:${{ steps.config.outputs.operator_ref }})
 
-      # PR-only: PaC triggers the pull-request pipeline off this comment
-      # (see .tekton/rhods-operator-gap-pull-request.yaml, on-comment
-      # annotation), the same way early-gate is driven by /early-gate.
-      - name: Post /build-konflux comment on PR
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.RHODS_CI_BOT_TOKEN }}
-        run: |
-          gh pr comment "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" \
-            --body '/build-konflux'
-
-      # There is deliberately no EG equivalent of the step above.  In EG mode
-      # this workflow is dispatched from the combined pipeline in
-      # rhoai-rhtap/konflux-central (early-gate/eg-operator-build.yaml), whose
-      # clone/prefetch/buildah tasks run after trigger-operator-processor
-      # returns - the build is the next task in the same PipelineRun, not a
-      # separate one.  Posting /test here would start a second, redundant
-      # build of the same commit.
+          # An early-gate run must push even when it has nothing to say.
+          #
+          # The ephemeral branch inherits build/operands-map.yaml from the branch
+          # it was forked from, and that source is refreshed by this same
+          # processor on its own schedule.  When it is already current the
+          # processor recomputes byte-identical content, nothing stages, and the
+          # `git diff --staged --quiet ||` short-circuit skips the push.  No push
+          # means .tekton/rhods-operator-gap-eg-push.yaml never fires, and the
+          # gate's monitor-operator-build then polls for a check-run that cannot
+          # appear until it times out - a legitimate no-op reported as a
+          # 90-minute failure.
+          #
+          # The ephemeral branch is throwaway and the gate's finally task deletes
+          # it, so an empty commit costs one redundant build and nothing else.
+          # That is a better trade than teaching the gate to tell "no change"
+          # apart from "built nothing", which it cannot do from absent results.
+          #
+          # Release runs keep the original behaviour.  They push to rhoai-X.Y,
+          # where an empty commit is noise in the history and - because this
+          # workflow triggers on push to rhoai-X.Y - would retrigger itself.
+          #
+          # The message prefix is load-bearing: the eg-push CEL matches on it to
+          # tell this commit from the push that created the branch, whose tip
+          # message is inherited from main/stable.  Keep them in step.
+          if [[ "${EG_MODE}" == "true" ]]; then
+            git commit --allow-empty \
+              -m "early-gate: pin component digests for ${TARGET_REF}"
+            git push origin "HEAD:${TARGET_REF}"
+          else
+            git diff --staged --quiet || (git commit -m "Updating the operator repo with latest images and manifests" && git push origin "HEAD:${TARGET_REF}")
+          fi
 
       - name: Upload debug logs
         if: always()

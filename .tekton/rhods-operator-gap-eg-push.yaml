@@ -15,13 +15,31 @@ metadata:
     # Two pushes land on the ephemeral branch: the one that creates it, and the
     # one operator-processor makes once it has pinned every component digest.
     # Only the second is worth building - the first is just a fork of
-    # main/stable that the release pipelines already cover.  Requiring
-    # build/operands-map.yaml to have changed selects exactly the processor's
-    # commit, because pinning the digests is what rewrites that file.
+    # main/stable that the release pipelines already cover.
+    #
+    # Two clauses select it, because neither alone covers both shapes the
+    # processor's commit can take:
+    #
+    #   pathChanged  - the ordinary case.  Pinning the digests is what rewrites
+    #                  build/operands-map.yaml, so a change there is the
+    #                  processor's signature.  A branch-creation push reports no
+    #                  changed files, so it does not match.
+    #   event_title  - the no-op case.  When the fork source was already current
+    #                  the processor has nothing to write and commits with
+    #                  --allow-empty, which touches no path at all, leaving the
+    #                  message as the only thing to match on.  The
+    #                  branch-creation push carries main/stable's tip message,
+    #                  which never starts with "early-gate:": those commits are
+    #                  only ever made on ephemeral branches, and ephemeral
+    #                  branches are deleted rather than merged.
+    #
+    # The prefix is written in .github/workflows/operator-processor.yaml.  The
+    # two have to change together.
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "push"
       && target_branch.startsWith("eg-")
-      && "build/operands-map.yaml".pathChanged()
+      && ("build/operands-map.yaml".pathChanged()
+          || event_title.startsWith("early-gate:"))
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
