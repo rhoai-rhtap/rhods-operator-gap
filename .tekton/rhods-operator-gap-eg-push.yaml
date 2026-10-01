@@ -46,9 +46,38 @@ metadata:
     pipelines.appstudio.openshift.io/type: build
   name: rhods-operator-gap-eg-on-push
   namespace: rhoai-tenant
+# ---------------------------------------------------------------------------
+# TEMPORARY: tuned for early-gate iteration speed, not for release fidelity.
+#
+# Run 5 spent 84 minutes between the build starting and clone-repository
+# finishing - the 4-arch build was sitting in the cluster queue, not building.
+# While Block 2 is still being brought up, every minute of that is a minute
+# not spent learning anything about the bundle path, so this file trades
+# release fidelity for turnaround:
+#
+#   multi-arch-container-build.yaml -> container-build.yaml   (x86_64 only)
+#   skip-checks: "true"            clair, snyk, clamav, coverity, preflight,
+#                                  sast-shell, sast-unicode, rpms-signature,
+#                                  deprecated-base-image all skipped
+#   hermetic: false + no prefetch  no cachi2 gomod/rpm prefetch
+#   build-source-image: false      no source-image build
+#
+# None of these affect what Block 2 consumes.  The bundle references the
+# operator by digest; it does not care how many architectures that digest
+# covers or which scanners looked at it.
+#
+# REVERT BEFORE THIS GOES ANYWHERE NEAR A REAL GATE.  The pre-change config is
+# in git history: multi-arch pipeline, 4 platforms, rhoai-version "3.6.0",
+# hermetic true with a gomod+rpm prefetch-input, build-source-image true,
+# build-image-index true.  A gate that scans nothing and builds one arch
+# cannot stand in for a release build.
+# ---------------------------------------------------------------------------
 spec:
+  # 4h -> 90m.  With one arch and no scans the build is minutes; a run that
+  # passes 90 minutes is queued or wedged, and finding that out sooner is the
+  # entire point of this configuration.
   timeouts:
-    pipeline: 4h
+    pipeline: 90m
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -65,41 +94,43 @@ spec:
     - '{{target_branch}}-{{revision}}'
   - name: output-image
     value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
-  # rhoai-init hard-fails a non-pull_request run with an empty rhoai-version
-  # ("ERROR: RHOAI version is required but was not provided").  An early-gate
-  # run is a push, so it has to supply one.  3.6.0 is what the release
-  # pipeline for this component passes; here it only feeds the image labels
-  # (version=v3.6.0) and the CPE id, neither of which the gate acts on.
-  - name: rhoai-version
-    value: "3.6.0"
+  # No rhoai-version.  The multi-arch pipeline declares one and forwards it to
+  # rhoai-init 0.1, which hard-fails a non-pull_request run when it is empty.
+  # container-build.yaml declares no such param and calls rhoai-init 0.2 with
+  # expected-cluster only, so there is nothing to feed - the same reason
+  # rhod-operator-bundle-gap-push.yaml omits it.  Passing it here would be a
+  # "param not declared in pipeline" error, not a no-op.
   - name: dockerfile
     value: Dockerfiles/Dockerfile.konflux
   - name: path-context
     value: .
+  # Skips clair-scan, sast-snyk-check, clamav-scan, sast-shell-check,
+  # sast-unicode-check, deprecated-base-image-check,
+  # ecosystem-cert-preflight-checks and rpms-signature-scan - every one of
+  # them is `when: $(params.skip-checks) in ["false"]` in container-build.yaml.
+  # The multi-arch pipeline has no skip-checks param at all and runs those
+  # tasks unconditionally, which is the other half of why this file moved.
+  - name: skip-checks
+    value: "true"
+  # hermetic false with no prefetch-input, so cachi2 does not resolve the gomod
+  # and rpm trees.  The build reaches the network instead, which is exactly
+  # what hermetic exists to prevent - hence the REVERT note above.
   - name: hermetic
-    value: true
+    value: false
   - name: prefetch-input
-    value: |
-      [
-        {
-          "type": "gomod",
-          "path": "."
-        },
-        {
-          "type": "rpm",
-          "path": "."
-        }
-      ]
+    value: ""
   - name: build-source-image
-    value: true
+    value: false
+  # false, but build-image-index still runs: it takes ALWAYS_BUILD_INDEX from
+  # this param and returns the single image's URL either way, and apply-tags
+  # consumes that result to attach additional-tags.  Setting it false skips
+  # the index manifest, not the tagging.
   - name: build-image-index
-    value: true
-  - name: build-platforms
-    value:
-    - linux/x86_64
-    - linux/ppc64le
-    - linux/s390x
-    - linux-m2xlarge/arm64
+    value: false
+  # No build-platforms: container-build.yaml does not declare it and builds
+  # x86_64 only.
+  - name: enable-slack-failure-notification
+    value: "false"
   pipelineRef:
     resolver: git
     params:
@@ -111,7 +142,7 @@ spec:
     - name: revision
       value: 'main'
     - name: pathInRepo
-      value: pipelines/multi-arch-container-build.yaml
+      value: pipelines/container-build.yaml
   taskRunTemplate:
     serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
