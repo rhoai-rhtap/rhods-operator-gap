@@ -57,7 +57,15 @@ spec:
   # lists four components and no operator, so it resolves source-branch=stable.
   # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
-    value: "4"
+    value: "5"
+  # defer-fbc-branch-cleanup was set "true" here from run 9 to run 13, to keep
+  # the eg-fbc-* branch after the run so the regenerated catalog could be read
+  # back and verify-fbc-images replayed against it offline.  It earned its keep:
+  # run 11's catalog is how the invalid v4.22 upgrade graph was pinned on the
+  # committed file rather than on the processor.
+  #
+  # Dropped now that Block 3 is green end to end.  Leaving it on means every run
+  # leaves a branch behind for someone to delete by hand.
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
