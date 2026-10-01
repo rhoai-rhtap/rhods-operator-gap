@@ -55,6 +55,16 @@ spec:
   # Once the Leader PR Manager drives this, it supplies the number.
   - name: leader-pr-number
     value: "5"
+  # TEMPORARY, for debugging Block 3 only.  Keeps the eg-fbc-* branch after the
+  # run instead of deleting it in finally, so the regenerated catalog can be
+  # read back and verify-fbc-images replayed against it offline.
+  #
+  # Run 8 failed verify-fbc-images in 13 seconds with fbc-processor green, and
+  # cleanup had already removed the branch by the time the failure was visible -
+  # there was nothing left to inspect.  Whoever sets this owns deleting the
+  # branch; revert it as soon as Block 3 is green.
+  - name: defer-fbc-branch-cleanup
+    value: "true"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
