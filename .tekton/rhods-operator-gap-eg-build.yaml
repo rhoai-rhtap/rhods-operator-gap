@@ -22,8 +22,27 @@ metadata:
   name: rhods-operator-gap-eg-build
   namespace: rhoai-tenant
 spec:
+  # 4h30m, not an arbitrary round number.  The gate's longest leg is
+  # monitor-operator-build, which watches the 4-arch hermetic operator build
+  # (x86_64, ppc64le, s390x, arm64 via multi-arch-container-build.yaml, with a
+  # cachi2 prefetch).  That build gives itself timeouts.pipeline: 4h in
+  # .tekton/rhods-operator-gap-eg-push.yaml, and the gate has to outlast it:
+  #
+  #     init .. trigger-operator-processor        ~2 min
+  #     monitor-operator-processor               <= 20   (processor-timeout-minutes)
+  #     monitor-operator-build                   <= 150  (build-timeout-minutes)
+  #     clone / fork / update / process / verify  ~8
+  #     push-bundle-to-ephemeral-branch           ~1
+  #     monitor-bundle-build                     <= 60   (bundle-build-timeout-minutes)
+  #                                              -------
+  #                                               ~241 min
+  #
+  # At 3h the pipeline could not even reach Block 2 on a cold operator build:
+  # run 3 timed out monitor-operator-build at 90 minutes and cleanup deleted
+  # the ephemeral branch while the build was still running.  Raising the task
+  # budget without raising this one would just move the failure.
   timeouts:
-    pipeline: 3h
+    pipeline: 4h30m
   params:
   # The leader PR the gate is running for.  gated-artifacts-promoter lives in
   # red-hat-data-services, not rhoai-rhtap - only the component PRs it lists
