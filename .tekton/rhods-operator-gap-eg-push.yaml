@@ -1,0 +1,152 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.openshift.io/repo: https://github.com/rhoai-rhtap/rhods-operator-gap?rev={{revision}}
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    # No build.appstudio.openshift.io/build-nudge-files here, on purpose.  The
+    # release push pipeline nudges downstream repos with the digest it just
+    # built; an early-gate build is a throwaway validation of an ephemeral
+    # branch and must never open nudge PRs anywhere.
+    #
+    # Two pushes land on the ephemeral branch: the one that creates it, and the
+    # one operator-processor makes once it has pinned every component digest.
+    # Only the second is worth building - the first is just a fork of
+    # main/stable that the release pipelines already cover.
+    #
+    # Two clauses select it, because neither alone covers both shapes the
+    # processor's commit can take:
+    #
+    #   pathChanged  - the ordinary case.  Pinning the digests is what rewrites
+    #                  build/operands-map.yaml, so a change there is the
+    #                  processor's signature.  A branch-creation push reports no
+    #                  changed files, so it does not match.
+    #   event_title  - the no-op case.  When the fork source was already current
+    #                  the processor has nothing to write and commits with
+    #                  --allow-empty, which touches no path at all, leaving the
+    #                  message as the only thing to match on.  The
+    #                  branch-creation push carries main/stable's tip message,
+    #                  which never starts with "early-gate:": those commits are
+    #                  only ever made on ephemeral branches, and ephemeral
+    #                  branches are deleted rather than merged.
+    #
+    # The prefix is written in .github/workflows/operator-processor.yaml.  The
+    # two have to change together.
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "push"
+      && target_branch.startsWith("eg-")
+      && ("build/operands-map.yaml".pathChanged()
+          || event_title.startsWith("early-gate:"))
+  labels:
+    appstudio.openshift.io/application: gap-poc
+    appstudio.openshift.io/component: rhods-operator-gap
+    pipelines.appstudio.openshift.io/type: build
+  name: rhods-operator-gap-eg-on-push
+  namespace: rhoai-tenant
+# ---------------------------------------------------------------------------
+# TEMPORARY: tuned for early-gate iteration speed, not for release fidelity.
+#
+# Run 5 spent 84 minutes between the build starting and clone-repository
+# finishing - the 4-arch build was sitting in the cluster queue, not building.
+# While Block 2 is still being brought up, every minute of that is a minute
+# not spent learning anything about the bundle path, so this file trades
+# release fidelity for turnaround:
+#
+#   multi-arch-container-build.yaml -> container-build.yaml   (x86_64 only)
+#   skip-checks: "true"            clair, snyk, clamav, coverity, preflight,
+#                                  sast-shell, sast-unicode, rpms-signature,
+#                                  deprecated-base-image all skipped
+#   hermetic: false + no prefetch  no cachi2 gomod/rpm prefetch
+#   build-source-image: false      no source-image build
+#
+# None of these affect what Block 2 consumes.  The bundle references the
+# operator by digest; it does not care how many architectures that digest
+# covers or which scanners looked at it.
+#
+# REVERT BEFORE THIS GOES ANYWHERE NEAR A REAL GATE.  The pre-change config is
+# in git history: multi-arch pipeline, 4 platforms, rhoai-version "3.6.0",
+# hermetic true with a gomod+rpm prefetch-input, build-source-image true,
+# build-image-index true.  A gate that scans nothing and builds one arch
+# cannot stand in for a release build.
+# ---------------------------------------------------------------------------
+spec:
+  # 4h -> 90m.  With one arch and no scans the build is minutes; a run that
+  # passes 90 minutes is queued or wedged, and finding that out sooner is the
+  # entire point of this configuration.
+  timeouts:
+    pipeline: 90m
+  params:
+  - name: git-url
+    value: '{{source_url}}'
+  # The ephemeral branch's HEAD - i.e. the commit operator-processor pushed,
+  # with every component pinned to the digests the leader PR is gating.  PaC
+  # expands this from the push event, so unlike the standalone EG pipeline
+  # there is no window in which the tag can name a different commit.
+  - name: revision
+    value: '{{revision}}'
+  # eg-<leader-pr-number>-<sha>.  The ephemeral branch is deleted as soon as
+  # the gate finishes, so this is the tag that keeps the image reachable.
+  - name: additional-tags
+    value:
+    - '{{target_branch}}-{{revision}}'
+  - name: output-image
+    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
+  # No rhoai-version.  The multi-arch pipeline declares one and forwards it to
+  # rhoai-init 0.1, which hard-fails a non-pull_request run when it is empty.
+  # container-build.yaml declares no such param and calls rhoai-init 0.2 with
+  # expected-cluster only, so there is nothing to feed - the same reason
+  # rhod-operator-bundle-gap-push.yaml omits it.  Passing it here would be a
+  # "param not declared in pipeline" error, not a no-op.
+  - name: dockerfile
+    value: Dockerfiles/Dockerfile.konflux
+  - name: path-context
+    value: .
+  # Skips clair-scan, sast-snyk-check, clamav-scan, sast-shell-check,
+  # sast-unicode-check, deprecated-base-image-check,
+  # ecosystem-cert-preflight-checks and rpms-signature-scan - every one of
+  # them is `when: $(params.skip-checks) in ["false"]` in container-build.yaml.
+  # The multi-arch pipeline has no skip-checks param at all and runs those
+  # tasks unconditionally, which is the other half of why this file moved.
+  - name: skip-checks
+    value: "true"
+  # hermetic false with no prefetch-input, so cachi2 does not resolve the gomod
+  # and rpm trees.  The build reaches the network instead, which is exactly
+  # what hermetic exists to prevent - hence the REVERT note above.
+  - name: hermetic
+    value: false
+  - name: prefetch-input
+    value: ""
+  - name: build-source-image
+    value: false
+  # false, but build-image-index still runs: it takes ALWAYS_BUILD_INDEX from
+  # this param and returns the single image's URL either way, and apply-tags
+  # consumes that result to attach additional-tags.  Setting it false skips
+  # the index manifest, not the tagging.
+  - name: build-image-index
+    value: false
+  # No build-platforms: container-build.yaml does not declare it and builds
+  # x86_64 only.
+  - name: enable-slack-failure-notification
+    value: "false"
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/rhoai-rhtap/konflux-central.git
+    # Pinned to main rather than '{{ target_branch }}': target_branch here is
+    # the ephemeral eg-* branch, which exists in the operator repo only and
+    # would never resolve against this repo.
+    - name: revision
+      value: 'main'
+    - name: pathInRepo
+      value: pipelines/container-build.yaml
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-rhods-operator-gap
+  workspaces:
+  - name: git-auth
+    secret:
+      secretName: '{{ git_auth_secret }}'
+status: {}
