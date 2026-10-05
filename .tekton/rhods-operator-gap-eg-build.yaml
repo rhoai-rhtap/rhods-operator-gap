@@ -79,6 +79,20 @@ spec:
   # rather than main's.
   - name: triggering-branch
     value: '{{target_branch}}'
+  # Which RHOAI release this gate run is for.  operator-processor looks every
+  # component image up in Quay by this tag, so it decides which images resolve
+  # at all - it is not just a label.
+  #
+  # Stated here rather than left to the workflow's fallback, which picks the
+  # newest rhoai-X.Y branch in this repo.  That default is silently sensitive
+  # to branch housekeeping: deleting rhoai-3.5 on 2026-10-05 moved it to
+  # rhoai-3.0, and the processor then failed with 55 of 120 components
+  # "missing" because those components postdate 3.0 and carry no rhoai-3.0
+  # tag.  Nothing in that error points at a deleted branch.
+  #
+  # Bump this when the gate should start gating the next release.
+  - name: rhoai-version
+    value: "3.5"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
