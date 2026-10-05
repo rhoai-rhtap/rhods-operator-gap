@@ -18,6 +18,16 @@ on:
         required: false
         default: ""
         type: string
+      rhoai-version:
+        description: >-
+          RHOAI version to process against, as "3.5" or "rhoai-3.5".  Only
+          consulted off a release branch - a push to rhoai-X.Y always uses its
+          own name.  The early gate passes this; leaving it empty falls back to
+          the newest rhoai-X.Y branch on the remote, which is a guess that
+          changes meaning whenever a release branch is created or deleted.
+        required: false
+        default: ""
+        type: string
   push:
     branches:
       - 'rhoai-[23].[0-9]'  # e.g. rhoai-2.1, rhoai-3.1, rhoai-3.4
@@ -82,6 +92,11 @@ jobs:
           ORG: ${{ env.GITHUB_ORG }}
           OPERATOR_REPO_NAME: ${{ env.OPERATOR_REPO_NAME }}
           POC_BRANCH: ${{ env.POC_BRANCH }}
+          # Through the environment rather than a ${{ }} expansion inside the
+          # script: this value comes from a workflow_dispatch caller, and an
+          # expansion would splice it into the shell source before bash ever
+          # sees it.
+          RHOAI_VERSION_INPUT: ${{ inputs.rhoai-version }}
         run: |
           set -euo pipefail
 
@@ -106,7 +121,28 @@ jobs:
           if [[ "$BRANCH" =~ ^rhoai- ]]; then
             RELEASE_BRANCH="$BRANCH"
             RBC_REF="$BRANCH"
+          elif [[ -n "${RHOAI_VERSION_INPUT}" ]]; then
+            # "3.5" and "rhoai-3.5" both accepted - a caller should not have to
+            # know which spelling this workflow happens to want.
+            RELEASE_BRANCH="rhoai-${RHOAI_VERSION_INPUT#rhoai-}"
+            if [[ ! "$RELEASE_BRANCH" =~ ^rhoai-[23]\.[0-9]+$ ]]; then
+              echo "::error::rhoai-version '${RHOAI_VERSION_INPUT}' is not an X.Y RHOAI version (expected e.g. 3.5 or rhoai-3.5)."
+              exit 1
+            fi
+            RBC_REF="$POC_BRANCH"
+            echo "::notice::Non-release branch '${BRANCH}' - version given explicitly as ${RELEASE_BRANCH}, RBC read from ${RBC_REF}"
           else
+            # No explicit version, so guess - and the guess is load-bearing in a
+            # way that is easy to miss.  RELEASE_BRANCH becomes the Quay tag
+            # every component image is looked up by, so when the newest
+            # rhoai-X.Y branch moves, so does the set of images that resolve.
+            # Deleting rhoai-3.5 from this fork on 2026-10-05 dropped the
+            # default to rhoai-3.0 and the processor then reported 55 of 120
+            # components as "Images missing" - a branch deletion surfacing as
+            # what looks like a registry problem.  The early gate passes
+            # rhoai-version for exactly this reason; this path is for ordinary
+            # dev pushes, where being approximately right is good enough.
+            #
             # Strip the rhoai- prefix before sorting: "rhoai-2" and "rhoai-3"
             # both sort numerically as 0, so sorting whole branch names picks
             # rhoai-2.25 over rhoai-3.5.  Majors are limited to 2 and 3 to
@@ -123,7 +159,7 @@ jobs:
             fi
             RELEASE_BRANCH="rhoai-${LATEST}"
             RBC_REF="$POC_BRANCH"
-            echo "::notice::Non-release branch '${BRANCH}' - version defaults to ${RELEASE_BRANCH}, RBC read from ${RBC_REF}"
+            echo "::warning::Non-release branch '${BRANCH}' - no rhoai-version given, guessing ${RELEASE_BRANCH} from the newest rhoai-X.Y branch. RBC read from ${RBC_REF}. Pass rhoai-version to pin this."
           fi
 
           {
