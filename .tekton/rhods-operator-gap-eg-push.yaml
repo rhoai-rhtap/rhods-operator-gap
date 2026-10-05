@@ -87,13 +87,33 @@ spec:
   # there is no window in which the tag can name a different commit.
   - name: revision
     value: '{{revision}}'
-  # eg-<leader-pr-number>-<sha>.  The ephemeral branch is deleted as soon as
-  # the gate finishes, so this is the tag that keeps the image reachable.
-  - name: additional-tags
-    value:
-    - '{{target_branch}}-{{revision}}'
+  # additional-tags used to carry '{{target_branch}}-{{revision}}' alongside a
+  # primary tag of eg-{{revision}}.  Those two now coincide - the branch-derived
+  # form below *is* the primary tag - so a second copy would just be the same
+  # string applied twice.
+  #
+  # quay.io/rhoai/pull-request-pipelines, not a release repo and not the POC
+  # redhat-user-workloads one.  Every quay.io/rhoai release repo (odh-operator,
+  # odh-operator-bundle, rhoai-fbc-fragment) is private, and monitor-pac-build
+  # resolves the digest over an anonymous Quay pull token, so it cannot see
+  # them.  pull-request-pipelines is public, is already where RHOAI puts
+  # non-release build artifacts (see odh-operator-pull-request.yaml), and being
+  # a different repo entirely it cannot collide with a release digest no matter
+  # what the tag says.
+  #
+  # The repo is shared between components, which is why the tag leads with the
+  # component name.
+  #
+  # The rest of the tag is {{target_branch}}-{{revision}}, and the branch is the
+  # ephemeral eg-<leader-pr-number>, so this expands to
+  # rhods-operator-eg-<leader-pr-number>-<40-char-sha>.  Deriving it from the
+  # branch rather than hardcoding "eg-" is what enforces the eg- prefix at the
+  # push point: the on-cel-expression below only fires for a target_branch
+  # starting with eg-, so a tag without that prefix is unreachable here rather
+  # than merely discouraged.  The ephemeral branch is deleted as soon as the
+  # gate finishes, so this tag is what keeps the image addressable afterwards.
   - name: output-image
-    value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:eg-{{revision}}
+    value: quay.io/rhoai/pull-request-pipelines:rhods-operator-{{target_branch}}-{{revision}}
   # No rhoai-version.  The multi-arch pipeline declares one and forwards it to
   # rhoai-init 0.1, which hard-fails a non-pull_request run when it is empty.
   # container-build.yaml declares no such param and calls rhoai-init 0.2 with
