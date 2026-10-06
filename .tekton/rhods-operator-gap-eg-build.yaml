@@ -93,19 +93,12 @@ spec:
   # Bump this when the gate should start gating the next release.
   - name: rhoai-version
     value: "3.5"
-  # TEMPORARY, revert with the pipelineRef revision below.  Exercising
-  # konflux-central#50 (the odh-operator tag prefix and the artifact table's
-  # Tag column) before it merges.  Both have to move together: the revision
-  # below decides where the pipeline body comes from, this decides where its
-  # tasks come from, and the change exists on neither unless both point at
-  # the branch.
-  #
-  # Urgent to revert: rhods-operator-gap#99/#100 already landed on main and
-  # stable, so the push file now tags odh-operator-... while konflux-central
-  # main still reconstructs rhods-operator-...  Until #50 merges, a gate run
-  # resolving the pipeline from main fails on an empty operator digest.
+  # Where the pipeline's *tasks* are resolved from; pair it with the
+  # pipelineRef revision below, which decides where the pipeline body comes
+  # from.  A change spanning both exists on neither unless both point at the
+  # same place, so move them together or not at all.
   - name: konflux-central-revision
-    value: "eg-tag-prefix-and-cleanup"
+    value: "main"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
@@ -121,11 +114,8 @@ spec:
       value: https://github.com/rhoai-rhtap/konflux-central.git
     # Pinned to main rather than '{{ target_branch }}': target_branch here is a
     # branch of the operator repo and would never resolve against this one.
-    #
-    # TEMPORARY: the PR branch, not main, paired with the
-    # konflux-central-revision above.  Back to 'main' once #50 merges.
     - name: revision
-      value: 'eg-tag-prefix-and-cleanup'
+      value: 'main'
     - name: pathInRepo
       value: early-gate/early-gate-component-pipeline.yaml
   taskRunTemplate:
