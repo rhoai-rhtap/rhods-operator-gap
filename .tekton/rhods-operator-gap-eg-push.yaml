@@ -112,8 +112,30 @@ spec:
   # starting with eg-, so a tag without that prefix is unreachable here rather
   # than merely discouraged.  The ephemeral branch is deleted as soon as the
   # gate finishes, so this tag is what keeps the image addressable afterwards.
+  #
+  # odh-operator, not rhods-operator.  The prefix names the Konflux component
+  # that produces the image, not the repository it is built from, and prod's
+  # operator component is odh-operator: konflux-central's
+  # pipelineruns/rhods-operator/.tekton/odh-operator-pull-request.yaml
+  # publishes pull-request-pipelines:odh-operator-{{revision}}.  Until now
+  # Block 1 was the only one of the three blocks not matching prod - Block 2
+  # already tags odh-operator-bundle-, Block 3 rhoai-fbc-fragment- - which
+  # made the shared repository look, in the gate's own PR comment, as though
+  # the three blocks were unrelated to the components they build.
+  #
+  # The '{{target_branch}}-' in the middle is what keeps this clear of prod's
+  # own PR builds, which tag odh-operator-{{revision}} with no branch segment.
+  # The CEL above restricts this file to branches starting with eg-, so the
+  # tag always expands to odh-operator-eg-...-<sha> and can never collide with
+  # a prod PR tag, let alone a release one.
+  #
+  # Changing this string means changing image-tag on monitor-operator-build in
+  # konflux-central's early-gate-component-pipeline.yaml in the same breath.
+  # The monitor polls for a tag it reconstructs; the two must agree
+  # character-for-character or the build succeeds, the poll 404s, and the gate
+  # fails downstream on an empty digest instead of on the real cause.
   - name: output-image
-    value: quay.io/rhoai/pull-request-pipelines:rhods-operator-{{target_branch}}-{{revision}}
+    value: quay.io/rhoai/pull-request-pipelines:odh-operator-{{target_branch}}-{{revision}}
   # No rhoai-version.  The multi-arch pipeline declares one and forwards it to
   # rhoai-init 0.1, which hard-fails a non-pull_request run when it is empty.
   # container-build.yaml declares no such param and calls rhoai-init 0.2 with
