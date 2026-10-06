@@ -93,6 +93,13 @@ spec:
   # Bump this when the gate should start gating the next release.
   - name: rhoai-version
     value: "3.5"
+  # TEMPORARY, revert with the pipelineRef revision below.  Exercising
+  # konflux-central#47 (the leader-PR comment) before it merges.  Both have to
+  # move together: the revision below decides where the pipeline body comes
+  # from, this decides where its tasks come from, and the new finally tasks
+  # exist on neither unless both point at the branch.
+  - name: konflux-central-revision
+    value: "eg-leader-pr-comment"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
@@ -108,8 +115,11 @@ spec:
       value: https://github.com/rhoai-rhtap/konflux-central.git
     # Pinned to main rather than '{{ target_branch }}': target_branch here is a
     # branch of the operator repo and would never resolve against this one.
+    #
+    # TEMPORARY: eg-leader-pr-comment, not main, paired with the
+    # konflux-central-revision above.  Back to 'main' once #47 merges.
     - name: revision
-      value: 'main'
+      value: 'eg-leader-pr-comment'
     - name: pathInRepo
       value: early-gate/early-gate-component-pipeline.yaml
   taskRunTemplate:
