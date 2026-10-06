@@ -94,12 +94,13 @@ spec:
   - name: rhoai-version
     value: "3.5"
   # TEMPORARY, revert with the pipelineRef revision below.  Exercising
-  # konflux-central#47 (the leader-PR comment) before it merges.  Both have to
+  # konflux-central#49 (unique ephemeral names, the artifact table's Tag
+  # column, and the odh-operator prefix) before it merges.  Both have to
   # move together: the revision below decides where the pipeline body comes
   # from, this decides where its tasks come from, and the new finally tasks
   # exist on neither unless both point at the branch.
   - name: konflux-central-revision
-    value: "eg-leader-pr-comment"
+    value: "eg-unique-names-and-render"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
@@ -116,10 +117,10 @@ spec:
     # Pinned to main rather than '{{ target_branch }}': target_branch here is a
     # branch of the operator repo and would never resolve against this one.
     #
-    # TEMPORARY: eg-leader-pr-comment, not main, paired with the
-    # konflux-central-revision above.  Back to 'main' once #47 merges.
+    # TEMPORARY: the PR branch, not main, paired with the
+    # konflux-central-revision above.  Back to 'main' once #49 merges.
     - name: revision
-      value: 'eg-leader-pr-comment'
+      value: 'eg-unique-names-and-render'
     - name: pathInRepo
       value: early-gate/early-gate-component-pipeline.yaml
   taskRunTemplate:
