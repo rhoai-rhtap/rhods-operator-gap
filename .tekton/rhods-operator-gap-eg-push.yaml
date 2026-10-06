@@ -47,37 +47,25 @@ metadata:
   name: rhods-operator-gap-eg-on-push
   namespace: rhoai-tenant
 # ---------------------------------------------------------------------------
-# TEMPORARY: tuned for early-gate iteration speed, not for release fidelity.
+# Build configuration tracks odh-operator-v3-5-push.yaml on rhoai-3.5: same
+# pipeline, same platforms, same hermetic/prefetch/source-image/index
+# settings.  A gate that scans nothing and builds one architecture cannot
+# stand in for a release build, so the differences from that file are only
+# the ones the gate requires - output image, service account, trigger, and
+# the absence of build-nudge-files.
 #
-# Run 5 spent 84 minutes between the build starting and clone-repository
-# finishing - the 4-arch build was sitting in the cluster queue, not building.
-# While Block 2 is still being brought up, every minute of that is a minute
-# not spent learning anything about the bundle path, so this file trades
-# release fidelity for turnaround:
-#
-#   multi-arch-container-build.yaml -> container-build.yaml   (x86_64 only)
-#   skip-checks: "true"            clair, snyk, clamav, coverity, preflight,
-#                                  sast-shell, sast-unicode, rpms-signature,
-#                                  deprecated-base-image all skipped
-#   hermetic: false + no prefetch  no cachi2 gomod/rpm prefetch
-#   build-source-image: false      no source-image build
-#
-# None of these affect what Block 2 consumes.  The bundle references the
-# operator by digest; it does not care how many architectures that digest
-# covers or which scanners looked at it.
-#
-# REVERT BEFORE THIS GOES ANYWHERE NEAR A REAL GATE.  The pre-change config is
-# in git history: multi-arch pipeline, 4 platforms, rhoai-version "3.6.0",
-# hermetic true with a gomod+rpm prefetch-input, build-source-image true,
-# build-image-index true.  A gate that scans nothing and builds one arch
-# cannot stand in for a release build.
+# This was the x86_64-only, scan-free configuration while Blocks 1-3 were
+# being brought up; run 5 spent 84 minutes with a 4-arch build sitting in the
+# cluster queue, which bought nothing while the bundle path was the unknown.
+# Expect the build to take substantially longer now.  That is the point.
 # ---------------------------------------------------------------------------
 spec:
-  # 4h -> 90m.  With one arch and no scans the build is minutes; a run that
-  # passes 90 minutes is queued or wedged, and finding that out sooner is the
-  # entire point of this configuration.
+  # 4h, as odh-operator-v3-5-push.yaml.  Was 90m while this built one
+  # architecture and ran no scanners; a 4-arch build that queues can exceed
+  # that legitimately, and killing it at 90m would look like a gate failure
+  # rather than a busy cluster.
   timeouts:
-    pipeline: 90m
+    pipeline: 4h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -136,43 +124,75 @@ spec:
   # fails downstream on an empty digest instead of on the real cause.
   - name: output-image
     value: quay.io/rhoai/pull-request-pipelines:odh-operator-{{target_branch}}-{{revision}}
-  # No rhoai-version.  The multi-arch pipeline declares one and forwards it to
-  # rhoai-init 0.1, which hard-fails a non-pull_request run when it is empty.
-  # container-build.yaml declares no such param and calls rhoai-init 0.2 with
-  # expected-cluster only, so there is nothing to feed - the same reason
-  # rhod-operator-bundle-gap-push.yaml omits it.  Passing it here would be a
-  # "param not declared in pipeline" error, not a no-op.
+  # Required, not optional, now that this is back on the multi-arch pipeline:
+  # that pipeline forwards rhoai-version to rhoai-init 0.1, which hard-fails a
+  # non-pull_request run when it is empty.  container-build.yaml declares no
+  # such param, which is why this line was absent while the file pointed
+  # there.
+  #
+  # X.Y.Z, not the X.Y the gate's own rhoai-version parameter carries:
+  # rhoai-init parses this into major/minor/patch to build a CPE ID.  The
+  # value matches odh-operator-v3-5-push.yaml on rhoai-3.5.
+  #
+  # It is a literal because nothing here can derive it.  PaC expands
+  # {{target_branch}} to the ephemeral eg-* branch, which names no release,
+  # and this file lives on main/stable rather than on a release branch the
+  # way prod's per-release push files do.  Bump it together with
+  # rhoai-version in rhods-operator-gap-eg-build.yaml, which is what decides
+  # the release for the rest of the run.
+  - name: rhoai-version
+    value: "3.5.2"
   - name: dockerfile
     value: Dockerfiles/Dockerfile.konflux
   - name: path-context
     value: .
-  # Skips clair-scan, sast-snyk-check, clamav-scan, sast-shell-check,
-  # sast-unicode-check, deprecated-base-image-check,
-  # ecosystem-cert-preflight-checks and rpms-signature-scan - every one of
-  # them is `when: $(params.skip-checks) in ["false"]` in container-build.yaml.
-  # The multi-arch pipeline has no skip-checks param at all and runs those
-  # tasks unconditionally, which is the other half of why this file moved.
-  - name: skip-checks
-    value: "true"
-  # hermetic false with no prefetch-input, so cachi2 does not resolve the gomod
-  # and rpm trees.  The build reaches the network instead, which is exactly
-  # what hermetic exists to prevent - hence the REVERT note above.
+  # No skip-checks.  multi-arch-container-build.yaml declares no such
+  # parameter and runs clair-scan, sast-snyk-check, clamav-scan,
+  # sast-shell-check, sast-unicode-check, deprecated-base-image-check,
+  # ecosystem-cert-preflight-checks and rpms-signature-scan unconditionally.
+  # Passing it would be a "param not declared in pipeline" error, not a
+  # no-op; it existed here only because container-build.yaml gates all eight
+  # on `when: $(params.skip-checks) in ["false"]`.
   - name: hermetic
-    value: false
+    value: true
+  # The gomod+rpm prefetch is what makes hermetic possible: cachi2 resolves
+  # both trees up front so the build never reaches the network.  hermetic
+  # true with this empty would fail to fetch dependencies rather than build
+  # offline.  Byte-for-byte odh-operator-v3-5-push.yaml's value.
   - name: prefetch-input
-    value: ""
+    value: |
+      [
+        {
+          "type": "gomod",
+          "path": "."
+        },
+        {
+          "type": "rpm",
+          "path": "."
+        }
+      ]
   - name: build-source-image
-    value: false
-  # false, but build-image-index still runs: it takes ALWAYS_BUILD_INDEX from
-  # this param and returns the single image's URL either way, and apply-tags
-  # consumes that result to attach additional-tags.  Setting it false skips
-  # the index manifest, not the tagging.
+    value: true
+  # true, and required by the platform list below rather than merely matching
+  # release: four architectures need an index manifest to be addressable by a
+  # single digest, which is the digest Block 2 pins the bundle to.
   - name: build-image-index
-    value: false
-  # No build-platforms: container-build.yaml does not declare it and builds
-  # x86_64 only.
-  - name: enable-slack-failure-notification
-    value: "false"
+    value: true
+  # Matches odh-operator-v3-5-push.yaml exactly, including
+  # linux-m2xlarge/arm64 - that is a Konflux instance type, not a
+  # typo for linux/arm64, and the release file uses it for arm64 only.
+  - name: build-platforms
+    value:
+    - linux/x86_64
+    - linux/ppc64le
+    - linux/s390x
+    - linux-m2xlarge/arm64
+  # No enable-slack-failure-notification either, and nothing is lost by it.
+  # multi-arch-container-build.yaml does not declare the parameter because it
+  # has no send-slack-notification task to suppress - the pipeline documents
+  # that it deliberately omits the finally block container-build.yaml carries.
+  # The gate's own failure reporting is comment-on-leader-pr-failure, which is
+  # unaffected.
   pipelineRef:
     resolver: git
     params:
@@ -183,8 +203,13 @@ spec:
     # would never resolve against this repo.
     - name: revision
       value: 'main'
+    # multi-arch-container-build.yaml, as odh-operator-v3-5-push.yaml uses.
+    # container-build.yaml, which this pointed at while iterating, declares no
+    # build-platforms parameter at all and builds x86_64 only - so the four
+    # platforms above are not merely unset there, they are unsettable, and
+    # passing them would be a validation error rather than a slow build.
     - name: pathInRepo
-      value: pipelines/container-build.yaml
+      value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
     # Not build-pipeline-rhods-operator-gap.  Konflux mints a Component's push
     # credential from that Component's containerImage, so the gap SA can push
