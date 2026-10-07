@@ -178,15 +178,37 @@ spec:
   # single digest, which is the digest Block 2 pins the bundle to.
   - name: build-image-index
     value: true
-  # Matches odh-operator-v3-5-push.yaml exactly, including
-  # linux-m2xlarge/arm64 - that is a Konflux instance type, not a
-  # typo for linux/arm64, and the release file uses it for arm64 only.
+  # x86_64 only, and this is the one place the gate deliberately builds
+  # less than release does.  odh-operator-v3-5-push.yaml builds four:
+  #
+  #     linux/x86_64  linux/ppc64le  linux/s390x  linux-m2xlarge/arm64
+  #
+  # (linux-m2xlarge/arm64 is a Konflux instance type, not a typo for
+  # linux/arm64 - the release file uses it for arm64 only.  Restore the
+  # list above verbatim when reinstating the full set.)
+  #
+  # What the gate is asking is whether the proposed operand digests
+  # assemble into a bundle and a catalog that are structurally sound.
+  # That question is answered identically on one architecture and on
+  # four; what the extra three buy is confidence that the operator
+  # *compiles* elsewhere, which the release build already establishes
+  # and which no component PR in the group can change.
+  #
+  # Run 21 measured the cost honestly: 27m32s for four architectures
+  # with the full scanner set, against a 150-minute budget.  So this is
+  # not a change forced by the operator leg - it is headroom bought back
+  # for the pipeline as a whole, whose 6h ceiling run 21 exceeded on the
+  # FBC leg.
+  #
+  # build-image-index stays true below.  With one platform the index is
+  # a single-entry manifest list rather than a four-entry one, but it is
+  # still what carries the bare tag, and the bare tag is what
+  # monitor-operator-build polls and what Block 2 pins against.  Setting
+  # it false here would push only odh-operator-...-linux-x86-64 and the
+  # monitor would 404 - that is run 13, on the FBC leg.
   - name: build-platforms
     value:
     - linux/x86_64
-    - linux/ppc64le
-    - linux/s390x
-    - linux-m2xlarge/arm64
   # No enable-slack-failure-notification either, and nothing is lost by it.
   # multi-arch-container-build.yaml does not declare the parameter because it
   # has no send-slack-notification task to suppress - the pipeline documents
