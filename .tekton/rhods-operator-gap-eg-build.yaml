@@ -6,15 +6,28 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    # Fires on every push to an open PR against main or stable.  This run does
-    # not build anything itself - it orchestrates: it reads the leader PR,
-    # forks an ephemeral eg-* branch from main or stable accordingly, kicks
-    # operator-processor at it, and then watches for the PaC build that
+    # Fires on every push to an open PR.  This run does not build anything
+    # itself - it orchestrates: it reads the leader PR, forks an ephemeral
+    # eg-* branch from the right source branch, kicks operator-processor at
+    # it, and then watches for the PaC build that
     # rhods-operator-gap-eg-push.yaml starts once the processor has pinned the
     # component digests.
+    #
+    # Any base branch except an ephemeral one.  This used to read
+    # `target_branch == "main" || target_branch == "stable"`, which meant a PR
+    # against a dev branch started no gate run at all - and, had the CEL alone
+    # been widened, resolve-group-configuration would still have forked the
+    # ephemeral branch from main or stable and gated code the PR does not
+    # contain.  Both halves move together: triggering-branch below carries the
+    # base branch into the pipeline, which forks from it.
+    #
+    # The eg- exclusion is a recursion guard.  The gate's own writes are
+    # pushes, not pull requests, so nothing today opens a PR against an
+    # eg-* branch - but a human doing so by hand would otherwise start a gate
+    # run whose first act is to fork from a branch the gate is about to delete.
     pipelinesascode.tekton.dev/on-cel-expression: |
       event == "pull_request"
-      && (target_branch == "main" || target_branch == "stable")
+      && !target_branch.startsWith("eg-")
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
@@ -22,8 +35,30 @@ metadata:
   name: rhods-operator-gap-eg-build
   namespace: rhoai-tenant
 spec:
+  # 6h, not an arbitrary round number.  The gate's longest leg is
+  # monitor-operator-build, which watches the hermetic operator build.  That
+  # build gives itself timeouts.pipeline: 4h in
+  # .tekton/rhods-operator-gap-eg-push.yaml, and the gate has to outlast it:
+  #
+  #     init .. trigger-operator-processor        ~2 min
+  #     monitor-operator-processor               <= 20   (processor-timeout-minutes)
+  #     monitor-operator-build                   <= 150  (build-timeout-minutes)
+  #     clone / fork / update / process / verify  ~8
+  #     push-bundle-to-ephemeral-branch           ~1
+  #     monitor-bundle-build                     <= 60   (bundle-build-timeout-minutes)
+  #     fork / fbc-process / verify-fbc           ~10
+  #     push-fbc-to-ephemeral-branch              ~1
+  #     monitor-fbc-build                        <= 90   (fbc-build-timeout-minutes)
+  #                                              -------
+  #                                               ~342 min
+  #
+  # At 3h the pipeline could not even reach Block 2 on a cold operator build:
+  # run 3 timed out monitor-operator-build at 90 minutes and cleanup deleted
+  # the ephemeral branch while the build was still running.  Raising the task
+  # budget without raising this one would just move the failure.  Block 3 added
+  # ~101 minutes of worst case on top of that, which is what took 4h30m to 6h.
   timeouts:
-    pipeline: 3h
+    pipeline: 6h
   params:
   # The leader PR the gate is running for.  gated-artifacts-promoter lives in
   # red-hat-data-services, not rhoai-rhtap - only the component PRs it lists
@@ -50,6 +85,26 @@ spec:
     value: "4"
   - name: operator-repo
     value: "rhoai-rhtap/rhods-operator-gap"
+  # The base branch of the PR that started this run.  main and stable keep the
+  # existing operator-PR heuristic in resolve-group-configuration; any other
+  # branch is forked from directly, so a PR on a dev branch gates its own code
+  # rather than main's.
+  - name: triggering-branch
+    value: '{{target_branch}}'
+  # Which RHOAI release this gate run is for.  operator-processor looks every
+  # component image up in Quay by this tag, so it decides which images resolve
+  # at all - it is not just a label.
+  #
+  # Stated here rather than left to the workflow's fallback, which picks the
+  # newest rhoai-X.Y branch in this repo.  That default is silently sensitive
+  # to branch housekeeping: deleting rhoai-3.5 on 2026-10-05 moved it to
+  # rhoai-3.0, and the processor then failed with 55 of 120 components
+  # "missing" because those components postdate 3.0 and carry no rhoai-3.0
+  # tag.  Nothing in that error points at a deleted branch.
+  #
+  # Bump this when the gate should start gating the next release.
+  - name: rhoai-version
+    value: "3.5"
   # enable-group-snapshot used to be set to "false" here, because the snapshot
   # block could not complete: generate-snapshot resolved digests through the
   # anonymous Quay API against a private quay.io/rhoai, and
