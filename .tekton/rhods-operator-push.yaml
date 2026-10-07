@@ -2,13 +2,21 @@ apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
-    build.appstudio.openshift.io/repo: https://github.com/rhoai-rhtap/rhods-operator-gap?rev={{revision}}
+    build.appstudio.openshift.io/repo: https://github.com/red-hat-data-services/rhods-operator?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
+    # TODO(prod): this file only fires on gap-poc, which does not exist in
+    # red-hat-data-services/rhods-operator. It is dead rather than harmful there,
+    # but repointing it at a release branch would race the release push pipeline -
+    # decide deliberately whether to drop the file or give it a real branch.
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
       == "gap-poc"
+  # TODO(prod): Konflux Components are immutable, so these three cannot be renamed.
+  # This builds a POC-only Component into a redhat-user-workloads repository; a
+  # dedicated Component has to be created in the production tenant, or the file
+  # dropped in favour of the existing release push pipeline.
   labels:
     appstudio.openshift.io/application: gap-poc
     appstudio.openshift.io/component: rhods-operator-gap
@@ -21,6 +29,8 @@ spec:
     value: '{{source_url}}'
   - name: revision
     value: '{{revision}}'
+  # TODO(prod): Konflux mints the push credential from the Component's own
+  # containerImage, so this repository is fixed by whichever Component is created.
   - name: output-image
     value: quay.io/redhat-user-workloads/rhoai-tenant/rhods-operator-gap:{{revision}}
   - name: dockerfile
@@ -541,6 +551,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
+    # TODO(prod): must be the SA of whichever Component is created.
     serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
   - name: git-auth

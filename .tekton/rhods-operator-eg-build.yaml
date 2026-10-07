@@ -1,0 +1,90 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  annotations:
+    build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/target_branch: '{{target_branch}}'
+    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/max-keep-runs: "3"
+    # Fires on every push to an open PR. This run builds nothing itself: it reads the leader PR, forks an ephemeral eg-* branch from the PR's base branch, kicks operator-processor at it, then watches for the build the push file starts
+    # Any base branch except an ephemeral one. Scoping it to main/stable meant a PR on a dev branch started no gate run, and widening the CEL alone would have forked from main and gated code the PR does not contain
+    # triggering-branch below carries the base branch into the pipeline, so both halves move together
+    # The eg- exclusion is a recursion guard: a hand-opened PR against an ephemeral branch would otherwise fork from a branch the gate is about to delete
+    pipelinesascode.tekton.dev/on-cel-expression: |
+      event == "pull_request"
+      && !target_branch.startsWith("eg-")
+  # TODO(prod): Konflux Components are immutable, so these three cannot be renamed.
+  # A dedicated early-gate Component has to be created in the production tenant and
+  # the application/component/name below set to it. build-check-name in
+  # konflux-central's early-gate pipeline must be changed to match in the same breath.
+  labels:
+    appstudio.openshift.io/application: gap-poc
+    appstudio.openshift.io/component: rhods-operator-gap
+    pipelines.appstudio.openshift.io/type: build
+  name: rhods-operator-gap-eg-build
+  namespace: rhoai-tenant
+spec:
+  # 10h covers the sum of every monitor budget in early-gate-component-pipeline.yaml plus the work between them, because the gate's blocks run in series:
+  #
+  #     init .. trigger-operator-processor        ~2 min
+  #     monitor-operator-processor               <= 30   (processor-timeout-minutes)
+  #     monitor-operator-build                   <= 270  (build-timeout-minutes)
+  #     clone / fork / update / process / verify  ~8
+  #     push-bundle-to-ephemeral-branch           ~1
+  #     monitor-bundle-build                     <= 90   (bundle-build-timeout-minutes)
+  #     fork / fbc-process / verify-fbc          ~10
+  #     push-fbc-to-ephemeral-branch              ~1
+  #     monitor-fbc-build                        <= 150  (fbc-build-timeout-minutes)
+  #                                              -------
+  #                                               ~562 min  (9h22m)
+  #
+  # The ~38 minutes of slack is for queueing between blocks, not for a monitor overrunning - each monitor enforces its own budget
+  # This number is downstream of those budgets and has no independent meaning: raising a task budget without redoing this arithmetic just moves the failure to the launcher
+  # The budgets already fit a four-architecture build, so restoring the platform matrix is a change to the push files alone
+  timeouts:
+    pipeline: 10h
+  params:
+  # The leader PR the gate is running for. gated-artifacts-promoter is its own repo; only the component PRs it lists live elsewhere.
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
+  # TODO(prod): hardcoded leader PR, which decides which component PRs the gate
+  # assembles. Once the Leader PR Manager drives this it supplies the number;
+  # until then pick a real leader PR rather than carrying this one over.
+  - name: leader-pr-number
+    value: "4"
+  - name: operator-repo
+    value: "red-hat-data-services/rhods-operator"
+  # The base branch of the PR that started this run. main and stable keep resolve-group-configuration's operator-PR heuristic; any other branch is forked from directly, so a PR on a dev branch gates its own code.
+  - name: triggering-branch
+    value: '{{target_branch}}'
+  # Which RHOAI release this gate run is for. operator-processor looks every component image up in Quay by this tag, so it decides which images resolve at all - it is not just a label.
+  # Stated rather than left to the workflow's fallback, which picks the newest rhoai-X.Y branch in this repo and is silently sensitive to branch housekeeping: deleting a release branch moved it back two releases and the processor then failed with 55 of 120 components "missing".
+  # TODO(prod): bump this when the gate should start gating the next release.
+  - name: rhoai-version
+    value: "3.5"
+  pipelineRef:
+    resolver: git
+    params:
+    - name: url
+      value: https://github.com/red-hat-data-services/konflux-central.git
+    # Pinned to main rather than '{{ target_branch }}': target_branch here is a branch of the operator repo and would never resolve against this one
+    - name: revision
+      value: 'main'
+    - name: pathInRepo
+      value: early-gate/early-gate-component-pipeline.yaml
+  taskRunTemplate:
+    # TODO(prod): must be the SA of whichever early-gate Component is created.
+    serviceAccountName: build-pipeline-rhods-operator-gap
+  workspaces:
+  # Deliberately not git_auth_secret: trigger-operator-processor-on-ephemeral-branch dispatches a workflow, which needs actions:write, and the PaC App token does not carry that scope
+  # The secret's single key is already named 'token', so no items: projection is needed
+  - name: github-credentials
+    secret:
+      secretName: eg-github-token
+  # The RHOAI Quay read-only robot, consumed by generate-snapshot. quay.io/rhoai is private, so without it the snapshot resolves no component digests at all.
+  # A dockerconfigjson secret projects its key verbatim, which is what the task reads and hands to skopeo as --authfile, so again no items: projection.
+  # TODO(prod): POC secret name; confirm or rename when the production secret is created.
+  - name: quay-credentials
+    secret:
+      secretName: rhoai-quay-gap-ro
+status: {}
