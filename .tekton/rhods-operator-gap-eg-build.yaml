@@ -80,6 +80,18 @@ spec:
   # child PRs, so resolve-group-configuration resolves source-branch=main; #5
   # lists four components and no operator, so it resolves source-branch=stable.
   # Once the Leader PR Manager drives this, it supplies the number.
+  #
+  # Both fixtures now carry red-hat-data-services/kserve#4621 as a child rather
+  # than a fork-org placeholder, because it is the only child with a PR build
+  # that actually exists in Quay - which is what exercises the by-commit probe
+  # in generate-snapshot instead of falling through to the release tag for
+  # every component.  Accepting a child from that org needs the pipeline's
+  # allowed-child-orgs to list it, which it does by default.
+  #
+  # That image carries image-expires-after: 5d, so the fixtures lapse.  When
+  # they do, every component resolves by fallback and the run is still green -
+  # a fallback is a warning, not a failure - so check the tag before reading a
+  # full-fallback result as a regression.  See early-gate/PR-DIGESTS.md.
   - name: leader-pr-number
     value: "4"
   - name: operator-repo
