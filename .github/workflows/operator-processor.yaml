@@ -123,9 +123,14 @@ jobs:
             RELEASE_BRANCH="$BRANCH"
             RBC_REF="$BRANCH"
           elif [[ -n "${RHOAI_VERSION_INPUT}" ]]; then
-            # "3.5" and "rhoai-3.5" both accepted - a caller should not have to
-            # know which spelling this workflow happens to want.
-            RELEASE_BRANCH="rhoai-${RHOAI_VERSION_INPUT#rhoai-}"
+            # "3.5", "rhoai-3.5" and "3.5.2" all accepted - a caller should not
+            # have to know which spelling this workflow happens to want, and the
+            # .tekton push files carry the z-stream.  Reduced to major.minor
+            # because RELEASE_BRANCH is a branch name: rhoai-3.5 exists,
+            # rhoai-3.5.2 does not, so passing the z-stream through produced a
+            # checkout failure one step later rather than an error here.
+            MAJOR_MINOR=$(printf '%s' "${RHOAI_VERSION_INPUT#rhoai-}" | cut -d. -f1,2)
+            RELEASE_BRANCH="rhoai-${MAJOR_MINOR}"
             if [[ ! "$RELEASE_BRANCH" =~ ^rhoai-[23]\.[0-9]+$ ]]; then
               echo "::error::rhoai-version '${RHOAI_VERSION_INPUT}' is not an X.Y RHOAI version (expected e.g. 3.5 or rhoai-3.5)."
               exit 1
