@@ -90,9 +90,15 @@ spec:
   # "missing" because those components postdate 3.0 and carry no rhoai-3.0
   # tag.  Nothing in that error points at a deleted branch.
   #
-  # Bump this when the gate should start gating the next release.
+  # Matches rhoai-version in .tekton/rhods-operator-gap-eg-push.yaml, which is
+  # the one branch sync maintains.  The launcher used to carry "3.5" while the
+  # push file carried "3.5.2", so the same run described its release two ways
+  # depending on which file was read.  Both consumers reduce to major.minor -
+  # generate-snapshot cuts the fallback tag to rhoai-3.5, and
+  # resolve-group-configuration builds the component suffix -v3-5 - so the
+  # z-stream is carried without affecting either.  Keep the two in step.
   - name: rhoai-version
-    value: "3.5"
+    value: "3.5.2"
   # Where the pipeline's *tasks* are resolved from; pair it with the
   # pipelineRef revision below, which decides where the pipeline body comes
   # from.  A change spanning both exists on neither unless both point at the
