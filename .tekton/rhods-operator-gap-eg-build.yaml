@@ -35,30 +35,41 @@ metadata:
   name: rhods-operator-gap-eg-build
   namespace: rhoai-tenant
 spec:
-  # 6h, not an arbitrary round number.  The gate's longest leg is
-  # monitor-operator-build, which watches the hermetic operator build.  That
-  # build gives itself timeouts.pipeline: 4h in
-  # .tekton/rhods-operator-gap-eg-push.yaml, and the gate has to outlast it:
+  # 10h, not an arbitrary round number.  This has to cover the sum of every
+  # monitor budget in early-gate-component-pipeline.yaml plus the work
+  # between them, because the gate's blocks run in series:
   #
   #     init .. trigger-operator-processor        ~2 min
-  #     monitor-operator-processor               <= 20   (processor-timeout-minutes)
-  #     monitor-operator-build                   <= 150  (build-timeout-minutes)
+  #     monitor-operator-processor               <= 30   (processor-timeout-minutes)
+  #     monitor-operator-build                   <= 270  (build-timeout-minutes)
   #     clone / fork / update / process / verify  ~8
   #     push-bundle-to-ephemeral-branch           ~1
-  #     monitor-bundle-build                     <= 60   (bundle-build-timeout-minutes)
-  #     fork / fbc-process / verify-fbc           ~10
+  #     monitor-bundle-build                     <= 90   (bundle-build-timeout-minutes)
+  #     fork / fbc-process / verify-fbc          ~10
   #     push-fbc-to-ephemeral-branch              ~1
-  #     monitor-fbc-build                        <= 90   (fbc-build-timeout-minutes)
+  #     monitor-fbc-build                        <= 150  (fbc-build-timeout-minutes)
   #                                              -------
-  #                                               ~342 min
+  #                                               ~562 min  (9h22m)
   #
-  # At 3h the pipeline could not even reach Block 2 on a cold operator build:
-  # run 3 timed out monitor-operator-build at 90 minutes and cleanup deleted
-  # the ephemeral branch while the build was still running.  Raising the task
-  # budget without raising this one would just move the failure.  Block 3 added
-  # ~101 minutes of worst case on top of that, which is what took 4h30m to 6h.
+  # 600 leaves ~38 minutes of slack.  That margin is for queueing - a block
+  # does not start the moment the one before it ends - not for a monitor
+  # overrunning, which cannot happen: each monitor enforces its own budget.
+  #
+  # This number is downstream of those budgets and has no independent
+  # meaning.  Changing one of them without redoing this arithmetic is the
+  # bug: at 3h the pipeline could not even reach Block 2 on a cold operator
+  # build, and run 3 timed out monitor-operator-build at 90 minutes while
+  # cleanup deleted the ephemeral branch out from under a build that was
+  # still running.  Raising a task budget without raising this one just
+  # moves the failure to the launcher.
+  #
+  # 6h -> 10h came with konflux-central#56, which raised all four monitors
+  # so that the gate's budgets fit a four-architecture build.  The operator
+  # and FBC builds are both pinned to x86_64 for now; the budgets are not,
+  # deliberately, so restoring the platform matrix is a change to the push
+  # files alone.
   timeouts:
-    pipeline: 6h
+    pipeline: 10h
   params:
   # The leader PR the gate is running for.  gated-artifacts-promoter lives in
   # red-hat-data-services, not rhoai-rhtap - only the component PRs it lists

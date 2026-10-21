@@ -12,21 +12,39 @@ metadata:
     appstudio.openshift.io/component: early-gate-ci
     pipelines.appstudio.openshift.io/type: test
   name: early-gate-ci-test
-  namespace: open-data-hub-tenant
+  # No metadata.namespace on purpose. PaC submits the PipelineRun into the
+  # namespace of the Konflux Repository/Component it resolves for this repo,
+  # and pinning a namespace that disagrees with it is rejected by Tekton with
+  # "the namespace of the provided object does not match the namespace sent on
+  # the request" - which happened with both rhoai-tenant and
+  # open-data-hub-tenant. Omitting it lets PaC fill in the namespace it is
+  # actually operating in, which is the only value guaranteed to match.
 spec:
   params:
   - name: git-url
     value: '{{source_url}}'
   - name: revision
     value: '{{revision}}'
+  # Which leader PR this test run belongs to. The early-gate-test-pipeline
+  # requires these (no defaults), and resolve-gate-artifacts reads the
+  # build-complete marker - the FBC digest the smoke test installs - from this
+  # PR's comments. Hardcoded for the POC, mirroring rhods-operator-gap-eg-build.yaml,
+  # because the Leader PR Manager that would supply them is not wired up yet.
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
+  - name: leader-pr-number
+    value: "4"
   timeouts:
     pipeline: 6h
     tasks: 5h
   pipelineRef:
     resolver: git
     params:
+    # RHOAI fork, not opendatahub-io. The test pipeline resolves components
+    # against the RHOAI component_repo_map.json, which is the only one that
+    # carries the rhods-operator entry.
     - name: url
-      value: https://github.com/opendatahub-io/odh-konflux-central.git
+      value: https://github.com/rhoai-rhtap/konflux-central.git
     - name: revision
       value: 'main'
     - name: pathInRepo
