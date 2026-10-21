@@ -12,7 +12,7 @@ metadata:
     appstudio.openshift.io/component: early-gate-ci
     pipelines.appstudio.openshift.io/type: test
   name: early-gate-ci-test
-  namespace: open-data-hub-tenant
+  namespace: rhoai-tenant
 spec:
   params:
   - name: git-url
@@ -25,8 +25,11 @@ spec:
   pipelineRef:
     resolver: git
     params:
+    # RHOAI fork, not opendatahub-io. The test pipeline resolves components
+    # against the RHOAI component_repo_map.json, which is the only one that
+    # carries the rhods-operator entry.
     - name: url
-      value: https://github.com/opendatahub-io/odh-konflux-central.git
+      value: https://github.com/rhoai-rhtap/konflux-central.git
     - name: revision
       value: 'main'
     - name: pathInRepo
