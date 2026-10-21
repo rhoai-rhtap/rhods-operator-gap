@@ -50,7 +50,12 @@ spec:
     - name: pathInRepo
       value: early-gate/early-gate-test-pipeline.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-early-gate-ci
+    # build-pipeline-rhods-operator-gap, the SA that exists in rhoai-tenant and
+    # that rhods-operator-gap-eg-build.yaml already runs under. The old
+    # build-pipeline-early-gate-ci SA belonged to the early-gate-ci Component in
+    # open-data-hub-tenant and does not exist here, so the run failed with
+    # 'serviceaccounts "build-pipeline-early-gate-ci" not found'.
+    serviceAccountName: build-pipeline-rhods-operator-gap
   workspaces:
   # early-gate-test-pipeline declares a single workspace, github-credentials,
   # not git-auth. It mounts the eg-github-token secret (key 'token') and uses
