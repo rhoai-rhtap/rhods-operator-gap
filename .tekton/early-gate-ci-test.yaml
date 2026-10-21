@@ -19,6 +19,15 @@ spec:
     value: '{{source_url}}'
   - name: revision
     value: '{{revision}}'
+  # Which leader PR this test run belongs to. The early-gate-test-pipeline
+  # requires these (no defaults), and resolve-gate-artifacts reads the
+  # build-complete marker - the FBC digest the smoke test installs - from this
+  # PR's comments. Hardcoded for the POC, mirroring rhods-operator-gap-eg-build.yaml,
+  # because the Leader PR Manager that would supply them is not wired up yet.
+  - name: leader-pr-repo
+    value: "red-hat-data-services/gated-artifacts-promoter"
+  - name: leader-pr-number
+    value: "4"
   timeouts:
     pipeline: 6h
     tasks: 5h
