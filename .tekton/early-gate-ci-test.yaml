@@ -52,7 +52,14 @@ spec:
   taskRunTemplate:
     serviceAccountName: build-pipeline-early-gate-ci
   workspaces:
-  - name: git-auth
+  # early-gate-test-pipeline declares a single workspace, github-credentials,
+  # not git-auth. It mounts the eg-github-token secret (key 'token') and uses
+  # it to dispatch the Jenkins-facing workflow (actions:write), read the run
+  # logs the Jenkins state is scraped from (actions:read), and comment on the
+  # leader PR (issues:write). Same secret and binding the build pipeline uses
+  # in rhods-operator-gap-eg-build.yaml. The previous git-auth binding both
+  # omitted the required workspace and supplied one the pipeline does not declare.
+  - name: github-credentials
     secret:
-      secretName: '{{ git_auth_secret }}'
+      secretName: eg-github-token
 status: {}
