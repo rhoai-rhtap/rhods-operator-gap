@@ -12,7 +12,14 @@ metadata:
     appstudio.openshift.io/component: early-gate-ci
     pipelines.appstudio.openshift.io/type: test
   name: early-gate-ci-test
-  namespace: rhoai-tenant
+  # open-data-hub-tenant, not rhoai-tenant. The early-gate-ci Konflux Component
+  # (application: early-gate) is registered in this tenant, and PaC submits the
+  # PipelineRun to the Component's namespace. Pinning rhoai-tenant here made the
+  # object namespace disagree with the request namespace, which Tekton rejects
+  # with "the namespace of the provided object does not match the namespace sent
+  # on the request". The rhods-operator-gap-eg-* files use rhoai-tenant because
+  # they are a different Component (gap-poc), not because this one should.
+  namespace: open-data-hub-tenant
 spec:
   params:
   - name: git-url
