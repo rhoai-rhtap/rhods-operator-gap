@@ -34,6 +34,13 @@ spec:
     value: "red-hat-data-services/gated-artifacts-promoter"
   - name: leader-pr-number
     value: "4"
+  # Jenkins base URL, no trailing slash. trigger-test-pipeline and
+  # monitor-jenkins-job otherwise look for a 'rhods-ci' secret with a
+  # 'jenkins-url' key in this namespace, which does not exist in rhoai-tenant.
+  # Passing the param directly takes precedence over that secret. This is the
+  # same host earlygate-smoke-trigger.yaml points at.
+  - name: jenkins-base-url
+    value: "https://jenkins-csb-rhods-opendatascience.dno.corp.redhat.com"
   timeouts:
     pipeline: 6h
     tasks: 5h
